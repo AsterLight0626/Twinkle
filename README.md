@@ -1,9 +1,9 @@
 # Twinkle
 A GPU-based High-efficiency binary microlensing code.
-一套基于GPU的高性能二体微引力透镜求解程序
 
-Anyone use Twinkle or some parts of the code please cite this paper: [S. Wang, et al. 2024, in prep]()
-如果您需要使用 Twinkle 程序，或者借鉴其中的部分代码实现，请引用这篇文章：[S. Wang, et al. 2024, in prep]()
+If you use Twinkle (or part of Twinkle) in your research work, we request citing our paper: Wang, S. et al., 2024, in prep.
+
+If you incorporate Twinkle  (or part of Twinkle) in your code, we request specifying it in the README file (or equivalent), including the GitHub link ( https://github.com/AsterLight0626/Twinkle ) and asking the user to cite our paper: Wang, S. et al., 2024, in prep.
 
 # 使用教程 
 推荐使用CUDA进行计算。使用提供的 MakeFile 进行编译
