@@ -33,7 +33,7 @@
 // #define THRESHOLD_REAL_FLOAT 3e-3
 
 static const int BATCH_SIZE = 64;            // must be the power of 2, like 32, 64, 128...           // 边缘取点，每次取 BATCH_SIZE 个；BATCH_SIZE <= NPOINTS, NPOINTS % BATCH_SIZE = 0  
-static const float RELTOL = 1e-7;            // relative tolerance
+static const float RELTOL = 1e-4;            // relative tolerance
 static const int NCRIT = 256;               // must be 2^n and < 1024
 static const int NCROSS_CANDIDATE = 128;     // needn't to change unless warning information let you do so
 static const int NPOINTS = 4096;             // maximum sampling points on the edge, set memory space. max = 6144 (shared memory)
