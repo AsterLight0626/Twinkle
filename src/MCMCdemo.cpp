@@ -18,11 +18,17 @@
 // {
 //     ////// INPUT OBSERVATIONAL MAGNIFICATION
 //     double obsMag[NSRCS], obsErr[NSRCS];
-//     std::ifstream inFlie("Magnification.txt");
+//     std::ifstream inFile("Magnification.txt");
+
+//     if (!inFile.is_open()) {
+//     std::cerr << "Error: Input file 'Magnification.txt' does not exist." << endl;
+//     return 1;
+//     }
+
 //     std::string line;
 //     for(int i=0;i<NSRCS;i++)        // NSRCS data in file
 //     {
-//         std::getline(inFlie, line);
+//         std::getline(inFile, line);
 //         obsMag[i] = std::stod(line);
 //         obsErr[i] = 0.1;
 //     }

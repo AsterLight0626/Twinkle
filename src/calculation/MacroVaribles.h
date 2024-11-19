@@ -37,6 +37,6 @@ static const float RELTOL = 1e-4;            // relative tolerance
 static const int NCRIT = 256;               // must be 2^n and < 1024
 static const int NCROSS_CANDIDATE = 128;     // needn't to change unless warning information let you do so
 static const int NPOINTS = 4096;             // maximum sampling points on the edge, set memory space. max = 6144 (shared memory)
-static const int NSRCS = 1024;                // set memory space, must >= Nsrcs in Twinkle
+static const int NSRCS = 1000;                // set memory space, must >= Nsrcs in Twinkle
 
 #define DetailedRecord false

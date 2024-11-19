@@ -606,9 +606,13 @@ _Global void AreaErrBatchSrc4(int* srclist, src_ext_t<f_T>* srcs, int batchidx, 
     f_T E_1;
     f_T E_2;
     f_T E_3;            // 与VBB一致
+    f_T E_4;            // difference of deltaS_p1 and deltaS_p2
     f_T deltaS_t;       // Trapezium approximation
     f_T deltaS_p;       // Parabolic correction
-    f_T deter;
+    // f_T deltaS_p1,deltaS_p2;
+    f_T& deltaS_p1 = E_2;       // save some memory
+    f_T& deltaS_p2 = E_3;       // save some memory
+    f_T& deter = E_1;           // save some memory
     f_T Qnext,Qhere;
     f_T dtheta2,dtheta3;
 
@@ -727,14 +731,22 @@ _Global void AreaErrBatchSrc4(int* srclist, src_ext_t<f_T>* srcs, int batchidx, 
                         {
                             deltaS_t = DeltaS1(zs[0],zs[1]);
                             // deltaS_t = (zs[0].re*zs[1].im - zs[0].im*zs[1].re)/2;
-                            deltaS_p = (wedge[0] + wedge[1]) * theta3[int(parity)] /24.;
-                            E_1 = fabs((wedge[0] - wedge[1]) * theta3[int(parity)]) /48.;
+                            deltaS_p1 = (wedge[0] + wedge[1]) * theta3[int(parity)] /24.;
+                            deltaS_p2 = wedge_product((zs[1]-zs[0]) , (dzs[1]-dzs[0])) * ddelta_theta[int(parity)] / 12.;
+                            // if(srcidx==0 && idx==12)
+                            // {
+                            //     printf("j = %d, deltaS_p: %.16f\n",j,deltaS_p);
+                            //     printf("j = %d, deltaS_p2: %.16f\n",j,deltaS_p2);
+                            // }
+                            deltaS_p = (deltaS_p1 + deltaS_p2) / 2.;
+                            E_4 = fabs((deltaS_p1 - deltaS_p2));
                             deter = theta2[int(parity)] * abs_c(dzs[0]*dzs[1]);
                             if(fabs(deter)>2e-12){E_2 = 1.5 * fabs( deltaS_p *  (norm(zs[0]-zs[1]) / deter -1));}
                             else
                             {
                                 E_2=0;
                             }        // usually caused by numericial error
+                            E_1 = fabs((wedge[0] - wedge[1]) * theta3[int(parity)]) /48.;
                             // mode = 0;
                             E_3 = 0.1 * fabs(deltaS_p) * theta2[int(parity)];
                         }
@@ -745,10 +757,11 @@ _Global void AreaErrBatchSrc4(int* srclist, src_ext_t<f_T>* srcs, int batchidx, 
                             E_1 = 0;
                             E_2 = 0;
                             E_3 = 0;
+                            E_4 = 0;
                         }
 
                         deltaS_t = deltaS_t+deltaS_p;
-                        E_1 = E_1+E_2+E_3;
+                        E_1 = E_1+E_2+E_3+E_4;
                         
 
                         pt_here->deltaS_new[j] = deltaS_t;
@@ -2007,6 +2020,9 @@ _Global void PhysicalTest(int* srclist, src_ext_t<f_T>*srcs, int batchidx, int p
                     {
                         printf("fatal error: idx_g < 0, srcidx: %d, idx_cross_p: %d, cross_i: %d\n",srcidx,idx_cross_p,i);
                     }
+                    srcs[srcidx].Break = true;
+                    srcs[srcidx].SolveSucceed = 1;          // 用于跳过后续计算，会在最后一个SumArea设置为fail
+                    srcs[srcidx].margin_pts[idx_cross_p].Nphys=0;
                 }
                 j_test_p[0] = srcs[srcidx].j_cross[i];
                 j_test_p[1] = srcs[srcidx].margin_pts[idx_cross_p].next_j[j_test_p[0]];
@@ -2016,6 +2032,9 @@ _Global void PhysicalTest(int* srclist, src_ext_t<f_T>*srcs, int batchidx, int p
                     {
                         printf("fatal error: fake j: srcidx: %d, idx_cross_p: %d, cross_i: %d, j0: %d, j1: %d\n",srcidx,idx_cross_p,i,j_test_p[0],j_test_p[1]);
                     }
+                    srcs[srcidx].Break = true;
+                    srcs[srcidx].SolveSucceed = 1;          // 用于跳过后续计算，会在最后一个SumArea设置为fail
+                    srcs[srcidx].margin_pts[idx_cross_p].Nphys=0;
                 }       
            
                 if(srcs[srcidx].margin_pts[idx_cross_p].Nphys==5)       // 这个点判断之初肯定是N5，但是有一种情况（虚像碎片连成环）会在之前的i循环里修改掉

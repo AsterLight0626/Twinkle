@@ -603,3 +603,11 @@ _Host_Device void operator-=(complex_t<f_T> &z1,const complex_t<f_T> &z2)
 }
 template _Host_Device void operator-=<float>(complex_t<float> &z1,const complex_t<float> &z2);
 template _Host_Device void operator-=<double>(complex_t<double> &z1,const complex_t<double> &z2);
+
+template<typename f_T>
+_Host_Device f_T wedge_product(const complex_t<f_T> &z1, const complex_t<f_T> &z2)
+{
+    return z1.re*z2.im - z1.im*z2.re;
+}
+template _Host_Device float wedge_product(const complex_t<float> &z1, const complex_t<float> &z2);
+template _Host_Device double wedge_product(const complex_t<double> &z1, const complex_t<double> &z2);

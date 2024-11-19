@@ -196,3 +196,6 @@ _Host_Device void MUL(complex_t<double> &z, const complex_t<float> &x, const com
 
 template <isFloating f_T>
 _Host_Device void operator-=(complex_t<f_T> &z1,const complex_t<f_T> &z2);
+
+template<typename f_T>
+_Host_Device f_T wedge_product(const complex_t<f_T> &z1, const complex_t<f_T> &z2);

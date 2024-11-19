@@ -659,7 +659,7 @@ void Twinkle<f_T>::writeto(std::string path, std::string suffix)
 
             name= "img_pt" + std::to_string(iii);
             name = path + name + txt;
-            
+
             ofs.open(name, std::ios::out);      // 以 write 模式打开 test.txt
 
 
