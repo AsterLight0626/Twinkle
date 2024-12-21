@@ -11,8 +11,8 @@ __host__ source_base_t:: source_base_t(  )
     // n_th  = 32;
     // n_src = 64*2*2;
     // n_src = 1;
-    n_src = 256;
-    // n_src = 900;
+    // n_src = 256;
+    n_src = 900;
 
     // Temporarily hard-coded
     n_point_max = 4096;
