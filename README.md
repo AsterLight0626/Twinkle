@@ -23,7 +23,7 @@ If you do not have suitable GPU equipment, we also provide [Twinkle_CPU](https:/
 
 如果您在研究工作中使用了Twinkle（或Twinkle的一部分），请引用我们的文章：[Wang, S. et al., 2025](https://doi.org/10.3847/1538-4365/ad9b8d).
 
-如果您将Twinkle（或Twinkle的一部分）整合到您的代码中，请您在README文件（或等效文件）中指明这一点。内容包括GitHub链接 (https://github.com/AsterLight0626/Twinkle)，并要求用户引用我们的论文：[Wang, S. et al., 2025](https://doi.org/10.3847/1538-4365/ad9b8d).
+如果您将Twinkle（或Twinkle的一部分）整合到您的代码中，请您在README文件（或等效文件）中指明这一点。内容包括GitHub链接 ( https://github.com/AsterLight0626/Twinkle )，并要求用户引用我们的论文：[Wang, S. et al., 2025](https://doi.org/10.3847/1538-4365/ad9b8d).
 
 
 # CPU 版本
