@@ -13,28 +13,33 @@
 
 int main()
 {
-    using std::chrono::high_resolution_clock;
-    
+    static const int Nsrcs = 1000;
 
-    twinkle::driver_t driver;
+    double xs[Nsrcs];
+    double ys[Nsrcs];
+    for(int idx=0;idx<Nsrcs;idx++)
+    {
+        xs[idx] = double(idx) / double(Nsrcs) * 1e-4 - 1.5001 + 0.11*1e-3;
+        ys[idx] = -0.0035;
+    }
+    double ss = 0.5;
+    double qq = 1e-6;
+    double rho = 1e-4;
+    double RelTol = 1e-4;
 
-    double ss = 0.9361015017623882;
-    double qq = 0.0001;
-    double xmax = -0.08184367955441649;
-    double xmin = -0.1796960807612752;
-    double ymax = 0.02655526837492009;
-    double ymin = 0.008455501382753586;
 
-    driver.init(  );
-    driver.set_params( ss, qq, 1e-4, xmax, xmin, ymax, ymin );
+    int n_stream = 10;
+    twinkle::driver_t driver( n_stream );
+
+    int device_num = 2;
+    driver.init( Nsrcs, device_num );
+    driver.set_params(ss,qq,rho,RelTol,xs,ys);
+
     driver.run (  );
-    driver.p_dev->sync_all_streams(  );
+    driver.p_dev->sync_all_streams(  );        
 
-    auto & pool_mag( driver.vp_sol[ 0 ]->pool_mag );
-    pool_mag.cp_d2h( * driver.p_dev );
-
-    // ofs_mag<<pool_mag.dat_h[iii].mag<<",";
-    // ofs_mag<<pool_mag.dat_h[iii].err<<",";
+    double magnification[Nsrcs];
+    driver.return_mag_to(magnification);
 
     driver.free();
 

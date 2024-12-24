@@ -65,7 +65,7 @@ __host__ void source_base_t::init( device_t & f_dev )
     return;
 }
 
-__host__ void source_base_t::set_params( device_t & f_dev, f_t ss, f_t qq, f_t rho, f_t xmax, f_t xmin, f_t ymax, f_t ymin )
+__host__ void source_base_t::set_params_2D( device_t & f_dev, f_t ss, f_t qq, f_t rho, f_t xmax, f_t xmin, f_t ymax, f_t ymin, int Nx, int Ny )
 {
     s = ss;
     q = qq;
@@ -73,8 +73,8 @@ __host__ void source_base_t::set_params( device_t & f_dev, f_t ss, f_t qq, f_t r
     RelTol    =   1e-4;
     m1 = 1 / ( q + 1 );
     m2 = q / ( q + 1 );
-    int Nx = 30;
-    int Ny = 30;
+    // int Nx = 30;
+    // int Ny = 30;
 
     for(int y_idx=0;y_idx<Ny;y_idx++)
     {
@@ -82,9 +82,34 @@ __host__ void source_base_t::set_params( device_t & f_dev, f_t ss, f_t qq, f_t r
         {
             auto & shape  = pool_center.dat_h[ x_idx + y_idx * Nx ];
             shape.rho = rho;
-            shape.loc_centre.re = ((f_t(x_idx)+0.5) / Nx) * (xmax - xmin) + xmin;
-            shape.loc_centre.im = ((f_t(y_idx)+0.5) / Ny) * (ymax - ymin) + ymin;            
+            shape.loc_centre.re = ((f_t(x_idx)+0.5) / f_t(Nx)) * (xmax - xmin) + xmin;
+            shape.loc_centre.im = ((f_t(y_idx)+0.5) / f_t(Ny)) * (ymax - ymin) + ymin;            
         }
+    }
+
+    pool_center.cp_h2d( f_dev );
+    return;
+}
+
+__host__ void source_base_t::set_params_1D( device_t & f_dev, f_t ss, f_t qq, f_t rho, f_t xmax, f_t xmin, f_t ymax, f_t ymin, int Nsrc )
+{
+    s = ss;
+    q = qq;
+
+    RelTol    =   1e-4;
+    m1 = 1 / ( q + 1 );
+    m2 = q / ( q + 1 );
+    // int Nx = 30;
+    // int Ny = 30;
+
+    for(int idx=0;idx<Nsrc;idx++)
+    {
+
+        auto & shape  = pool_center.dat_h[ idx ];
+        shape.rho = rho;
+        shape.loc_centre.re = ((f_t(idx)) / f_t(Nsrc)) * (xmax - xmin) + xmin;
+        shape.loc_centre.im = ((f_t(idx)) / f_t(Nsrc)) * (ymax - ymin) + ymin;            
+
     }
 
     pool_center.cp_h2d( f_dev );
@@ -1845,7 +1870,7 @@ __device__ void source_base_t::slope_test_local  (local_info_t<f_t>& local_info 
         {
             if(slope_test(pt_prev, pt_here, jj, prev_idx, Break))
             {
-                local_info.shared_info->Break = true;
+                // local_info.shared_info->Break = true;
                 if(!Break)
                 {
                     int temp0 = atomicAdd(&local_info.shared_info->Ncross, 1);
@@ -1867,7 +1892,7 @@ __device__ void source_base_t::slope_test_local  (local_info_t<f_t>& local_info 
     {
         if(slope_test(pt_here, pt_prev, jj, idx, Break))
         {
-            local_info.shared_info->Break = true;
+            // local_info.shared_info->Break = true;
             if(!Break)
             {
                 int temp0 = atomicAdd(&local_info.shared_info->Ncross, 1);
@@ -1889,7 +1914,7 @@ __device__ void source_base_t::slope_test_local  (local_info_t<f_t>& local_info 
     {
         if(slope_test(pt_here, pt_next, jj, idx, Break))
         {
-            local_info.shared_info->Break = true;
+            // local_info.shared_info->Break = true;
             if(!Break)
             {            
                 int temp0 = atomicAdd(&local_info.shared_info->Ncross, 1);
@@ -1912,7 +1937,7 @@ __device__ void source_base_t::slope_test_local  (local_info_t<f_t>& local_info 
         {
             if(slope_test(pt_next, pt_here, jj, next_idx, Break))
             {
-                local_info.shared_info->Break = true;
+                // local_info.shared_info->Break = true;
                 if(!Break)
                 {
                     int temp0 = atomicAdd(&local_info.shared_info->Ncross, 1);
@@ -3158,6 +3183,7 @@ __device__ void source_base_t::sum_area_3_local ( local_info_t<f_t>& local_info 
     {
         ex_info.SolveSucceed = true;
     }
+    __syncthreads();
     Area = deltaS[0] + ex_info.Area;
     Error = Err[0] + ex_info.Err_A;
     tempS = local_info.src_shape.src_area;

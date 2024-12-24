@@ -102,44 +102,44 @@ __global__ void solve_extended_sh( const src_T src )      // 不用 const 因为
         src.slope_test_local( local_info );
         __syncthreads();        
 
-        // if(local_info.shared_info->Ncross > 0  && (!local_info.shared_info->Break))
-        // {
-        //     if(threadIdx.x==0)
-        //     {
-        //         printf("srcidx: %d\n",blockIdx.x);
-        //     }
-        //     {
-        //         // shared neighbor02 to global
-        //         if( local_info.neighbor3[0] < local_info.batchidx * src.n_th )
-        //         {
-        //             for(int j=3;j<5;j++)
-        //             {
-        //                 src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].next_idx[j] = local_info.pt_prev.next_idx[j];
-        //                 src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].next_j[j] = local_info.pt_prev.next_j[j];
-        //             }
-        //             src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].next_src_idx = local_info.pt_prev.next_src_idx;
-        //         }
-        //         src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[1]] = local_info.new_pts[ threadIdx.x ];
-        //         if( local_info.neighbor3[2] < local_info.batchidx * src.n_th )
-        //         {
-        //             for(int j=0;j<3;j++)
-        //             {
-        //                 src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].next_idx[j] = local_info.pt_next.next_idx[j];
-        //                 src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].next_j[j] = local_info.pt_next.next_j[j];
-        //             }
-        //             src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].prev_src_idx = local_info.pt_next.prev_src_idx;
-        //         }
-        //         __syncthreads();
+        if(local_info.shared_info->Ncross > 0  && (!local_info.shared_info->Break))
+        {
+            // if(threadIdx.x==0)
+            // {
+            //     printf("srcidx: %d\n",blockIdx.x);
+            // }
+            {
+                // shared neighbor02 to global
+                if( local_info.neighbor3[0] < local_info.batchidx * src.n_th )
+                {
+                    for(int j=3;j<5;j++)
+                    {
+                        src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].next_idx[j] = local_info.pt_prev.next_idx[j];
+                        src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].next_j[j] = local_info.pt_prev.next_j[j];
+                    }
+                    src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].next_src_idx = local_info.pt_prev.next_src_idx;
+                }
+                src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[1]] = local_info.new_pts[ threadIdx.x ];
+                if( local_info.neighbor3[2] < local_info.batchidx * src.n_th )
+                {
+                    for(int j=0;j<3;j++)
+                    {
+                        src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].next_idx[j] = local_info.pt_next.next_idx[j];
+                        src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].next_j[j] = local_info.pt_next.next_j[j];
+                    }
+                    src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].prev_src_idx = local_info.pt_next.prev_src_idx;
+                }
+                __syncthreads();
 
-        //         src.slope_detector_g( local_info );
-        //         __syncthreads(); 
+                src.slope_detector_g( local_info );
+                __syncthreads(); 
 
-        //         local_info.pt_prev = src.pool_margin[ blockIdx.x * src.n_point_max + local_info.neighbor3[0] ];
-        //         local_info.pt_next = src.pool_margin[ blockIdx.x * src.n_point_max + local_info.neighbor3[2] ];
-        //         local_info.new_pts[ threadIdx.x ] = src.pool_margin[ blockIdx.x * src.n_point_max + local_info.neighbor3[1] ];
-        //         __syncthreads();
-        //     }
-        // }
+                local_info.pt_prev = src.pool_margin[ blockIdx.x * src.n_point_max + local_info.neighbor3[0] ];
+                local_info.pt_next = src.pool_margin[ blockIdx.x * src.n_point_max + local_info.neighbor3[2] ];
+                local_info.new_pts[ threadIdx.x ] = src.pool_margin[ blockIdx.x * src.n_point_max + local_info.neighbor3[1] ];
+                __syncthreads();
+            }
+        }
 
         src.area_err_local( local_info );
         __syncthreads();
@@ -352,7 +352,8 @@ public:                      // Data
     pool_t< src_ext_t   < f_t > > pool_extended;
 public:                         // Functions
     __host__ virtual void init( device_t & f_dev );
-    __host__ virtual void set_params( device_t & f_dev, f_t ss, f_t qq, f_t rho, f_t xmax, f_t xmin, f_t ymax, f_t ymin );
+    __host__ virtual void set_params_2D( device_t & f_dev, f_t ss, f_t qq, f_t rho, f_t xmax, f_t xmin, f_t ymax, f_t ymin, int Nx, int Ny );
+    __host__ virtual void set_params_1D( device_t & f_dev, f_t ss, f_t qq, f_t rho, f_t xmax, f_t xmin, f_t ymax, f_t ymin, int Nsrc );
     __host__ virtual void set_same( device_t & f_dev, f_t ss, f_t qq, f_t rho, f_t zeta_x, f_t zeta_y );
     __host__ virtual void free( device_t & f_dev );    
 
@@ -368,7 +369,8 @@ protected:                      // Data
     // int           n_th;
 
     ////////// Lensing parameters //////////
-protected:                      // Data
+// protected:                      // Data
+public:
     static constexpr int order = 6;
     f_t         s;
     f_t         q;
