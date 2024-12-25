@@ -27,14 +27,18 @@ int main()
     double rho = 1e-4;
     double RelTol = 1e-4;
 
-
+    // set number of streams
     int n_stream = 10;
     twinkle::driver_t driver( n_stream );
 
-    int device_num = 2;
+    // set device, allocate memory space
+    int device_num = 0;
     driver.init( Nsrcs, device_num );
-    driver.set_params(ss,qq,rho,RelTol,xs,ys);
 
+    // set parameters
+    driver.set_params(ss,qq,rho,RelTol,xs,ys);
+    
+    // solve magnification
     driver.run (  );
     driver.p_dev->sync_all_streams(  );        
 
