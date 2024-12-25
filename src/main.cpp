@@ -15,6 +15,7 @@ int main()
 {
     static const int Nsrcs = 1000;
 
+    // coordinates of sources center
     double xs[Nsrcs];
     double ys[Nsrcs];
     for(int idx=0;idx<Nsrcs;idx++)
@@ -37,7 +38,7 @@ int main()
 
     // set parameters
     driver.set_params(ss,qq,rho,RelTol,xs,ys);
-    
+
     // solve magnification
     driver.run (  );
     driver.p_dev->sync_all_streams(  );        
