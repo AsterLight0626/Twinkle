@@ -73,14 +73,9 @@ __global__ void solve_extended_sh( const src_T src )      // 不用 const 因为
 
     // calculation
     for(int bcidx=0;bcidx < (src.n_point_max / src.n_th) ;bcidx++)
-    // for(int bcidx=0;bcidx < 2 ;bcidx++)
+    // for(int bcidx=0;bcidx < 6 ;bcidx++)
     {
         if((local_info.src_ext.SolveSucceed)||(local_info.shared_info->Break)){break;}
-
-        // if(threadIdx.x==0 && bcidx>=10 )
-        // {
-        //     printf("srcidx: %d, Break : %d, batchidx: %d\n",blockIdx.x, local_info.shared_info->Break, bcidx);
-        // }
 
         if(local_info.batchidx==0){src.margin_set_local( local_info );}
         else{src.adap_set_g( local_info );}
@@ -106,7 +101,8 @@ __global__ void solve_extended_sh( const src_T src )      // 不用 const 因为
         {
             // if(threadIdx.x==0)
             // {
-            //     printf("srcidx: %d\n",blockIdx.x);
+            //     printf("streamidx: %d, srcidx: %d, batchidx: %d\n",src.streamidx,blockIdx.x, bcidx);
+            //     printf("cross idx: %d\n",local_info.cross_info[ 0 ].idx_cross);
             // }
             {
                 // shared neighbor02 to global
@@ -197,6 +193,7 @@ __global__ void solve_extended_sh( const src_T src )      // 不用 const 因为
         local_info.batchidx += 1;
     }
 
+
         // __syncthreads();
 
         // if((local_info.src_ext.SolveSucceed)||(local_info.shared_info->Break))
@@ -205,17 +202,16 @@ __global__ void solve_extended_sh( const src_T src )      // 不用 const 因为
         //     {
         //         printf("break!: srcidx: %d, succeed: %d, Breal: %d\n",blockIdx.x,local_info.src_ext.SolveSucceed,local_info.shared_info->Break);                
         //     }
+        //     if(blockIdx.x==48 && src.streamidx==3)
+        //     {
+        //         printf("break\n");
+        //     }
+            
         // }
         // else
         // {
         //     src.adap_set_g( local_info );
         //     __syncthreads();
-        //     // src.pool_margin[i_src * src.n_point_max + threadIdx.x + local_info.batchidx*src.n_th].position = local_info.new_pts[ threadIdx.x ].position;
-        //     // src.pool_margin[i_src * src.n_point_max + threadIdx.x + local_info.batchidx*src.n_th].Q = local_info.new_pts[ threadIdx.x ].Q;
-        //     // src.pool_margin[i_src * src.n_point_max + threadIdx.x + local_info.batchidx*src.n_th].next_src_idx = local_info.new_pts[ threadIdx.x ].next_src_idx;
-        //     // src.pool_margin[i_src * src.n_point_max + threadIdx.x + local_info.batchidx*src.n_th].prev_src_idx = local_info.new_pts[ threadIdx.x ].prev_src_idx;
-        //     // src.pool_margin[i_src * src.n_point_max + threadIdx.x + local_info.batchidx*src.n_th].Nphys = local_info.new_pts[ threadIdx.x ].Nphys;
-
 
         //     src.margin_solve_local( local_info );
         //     __syncthreads();
@@ -223,6 +219,28 @@ __global__ void solve_extended_sh( const src_T src )      // 不用 const 因为
         //     __syncthreads(); 
         //     src.connect_next_local( local_info );
         //     __syncthreads();
+        //     // if(blockIdx.x==48 && threadIdx.x==0)
+        //     // {
+        //     //     printf("streamidx: %d, srcidx: %d, batchidx: last\n",src.streamidx,blockIdx.x);
+        //     //     printf("Ncross")
+        //     //     printf("cross idx: %d\n",local_info.cross_info[ 0 ].idx_cross);
+        //     //     // int crossidx = local_info.cross_info[ 0 ].idx_cross;
+        //     //     printf("378 Q: %.16f\n",local_info.new_pts[58].Q);
+        //     //     printf("379 Q: %.16f\n",local_info.new_pts[59].Q);
+        //     //     printf("379 Nphys: %d\n",local_info.new_pts[59].Nphys);
+        //     //     auto & images = local_info.new_pts[59].images;
+        //     //     printf("images: 0: (%.16f, %.16f), 1: (%.16f, %.16f), 2: (%.16f, %.16f), 3: (%.16f, %.16f), 4: (%.16f, %.16f),\n",
+        //     //     images[0].position.re, images[0].position.im,
+        //     //     images[1].position.re, images[1].position.im,
+        //     //     images[2].position.re, images[2].position.im,
+        //     //     images[3].position.re, images[3].position.im,
+        //     //     images[4].position.re, images[4].position.im);
+
+        //     //     printf("prev of 312: %d\n",src.pool_margin[i_src * src.n_point_max + 312].prev_src_idx);
+        //     //     printf("prev of 312: %d\n",src.prev_src_idx_local_g(312, local_info, blockIdx.x));              
+        //     // }
+
+
 
         //     if( threadIdx.x == 0 )
         //     {
@@ -232,16 +250,24 @@ __global__ void solve_extended_sh( const src_T src )      // 不用 const 因为
         //     }
         //     __syncthreads();
         //     src.slope_test_local( local_info );
-        //     __syncthreads();        
+        //     __syncthreads();  
+        //     if(local_info.shared_info->Ncross > 0  && (!local_info.shared_info->Break))
+        //     {
+        //         if(threadIdx.x==0)
+        //         {
+        //             printf("streamidx: %d, srcidx: %d, batchidx: last\n",src.streamidx,blockIdx.x);
+        //             printf("cross idx: %d\n",local_info.cross_info[ 0 ].idx_cross);
+        //         }      
+        //     }
 
-        //     if(blockIdx.x!=313)
+        //     if(true)
         //     {
         //         src.area_err_local( local_info );           
         //     }
-        //     else
-        //     {
-        //         src.area_err_local_test( local_info );
-        //     }
+        //     // else
+        //     // {
+        //     //     src.area_err_local_test( local_info );
+        //     // }
         //     __syncthreads();  
             
         //     // shared neighbor02 to global
@@ -290,12 +316,6 @@ __global__ void solve_extended_sh( const src_T src )      // 不用 const 因为
         //     }
 
         // }
-
-    // __syncthread();
-    // if(blockIdx.x==377)
-    // {
-        
-    // }
 
 
 
@@ -361,7 +381,7 @@ public:                         // Functions
 
     int             n_src;
     static constexpr int n_th = 64;
-    // int       batchidx;
+    int       streamidx;
 protected:                      // Data
     device::stream_t    stream;
     int     size_batch;
@@ -380,7 +400,8 @@ public:
     // int  batchidx;
     
     ////////// Device-side interfaces //////////
-protected:                      // Functions
+// protected:                      // Functions
+public:
     __device__ f_t  yield_lens_coef
     ( c_t   * coef, const c_t & zeta ) const;
     __device__ bool solve_lens_eq
@@ -521,7 +542,7 @@ public:                         // Functions
 
     // __device__ void area_err          (  ) const;
     __device__ void area_err_local    ( local_info_t<f_t>& local_info ) const;
-    __device__ void area_err_local_test( local_info_t<f_t>& local_info ) const;
+    // __device__ void area_err_local_test( local_info_t<f_t>& local_info ) const;
     __device__ void area_err_c_local  ( local_info_t<f_t>& local_info ) const;
 
     __device__ void sum_area_0_g      ( local_info_t<f_t>& local_info ) const;

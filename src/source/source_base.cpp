@@ -15,7 +15,7 @@ __host__ source_base_t:: source_base_t(  )
     n_src = 900;
 
     // Temporarily hard-coded
-    n_point_max = 4096;
+    n_point_max = 512;
     n_cross_max =  n_th;
     return;
 }
@@ -2012,7 +2012,8 @@ __device__ void source_base_t::slope_detector_g    ( local_info_t<f_t>& local_in
         j_test_p[1] = local_info.cross_info[ i ].j1;
 
         ghost_direction = ( (j_test_p[0]<3) ? 0 : 1 );
-        idx_cross_g = ( (j_test_p[0]<3) ? prev_src_idx_local_g(idx_cross_p, local_info, blockIdx.x) : next_src_idx_local_g(idx_cross_p, local_info, blockIdx.x) );
+        idx_cross_g = ( (j_test_p[0]<3) ? prev_src_idx_g(idx_cross_p, blockIdx.x) : next_src_idx_g(idx_cross_p, blockIdx.x) );
+        // printf("idx_g: %d\n",idx_cross_g);
 
     
         if(pool_margin[srcidx * n_point_max + idx_cross_p].Nphys==5)       // 这个点判断之初肯定是N5，但是有一种情况（虚像碎片连成环）会在之前的i循环里修改掉
@@ -2029,6 +2030,11 @@ __device__ void source_base_t::slope_detector_g    ( local_info_t<f_t>& local_in
             }
             posi_g[0] = pool_margin[srcidx * n_point_max + idx_cross_g].images[2].position;
             posi_g[1] = pool_margin[srcidx * n_point_max + idx_cross_g].images[3].position;
+            if(pool_margin[srcidx * n_point_max + idx_cross_g].images[2].physical || pool_margin[srcidx * n_point_max + idx_cross_g].images[3].physical)
+            {
+                local_info.shared_info->Break = true;
+                return;
+            }
 
             iter_i = 0;
             posi_p[0] = posi_p[1] - posi_p[0];      // vector between two points
@@ -2060,12 +2066,13 @@ __device__ void source_base_t::slope_detector_g    ( local_info_t<f_t>& local_in
                 j_test_p[1] = pool_margin[srcidx * n_point_max + idx_cross_p].next_j[j_test_p[1]];
                 if(ghost_direction)
                 {
-                    idx_cross_p = prev_src_idx_local_g(idx_cross_p, local_info, blockIdx.x);
+                    idx_cross_p = prev_src_idx_g(idx_cross_p, blockIdx.x);
                 }
                 else
                 {       
-                    idx_cross_p = next_src_idx_local_g(idx_cross_p, local_info, blockIdx.x);                  
+                    idx_cross_p = next_src_idx_g(idx_cross_p, blockIdx.x);                  
                 }
+                // printf("idx_p: %d\n",idx_cross_p);
                 if(pool_margin[srcidx * n_point_max + idx_cross_p].Nphys!=5)
                 {
                     // 该片段已走到尽头，也没通过
@@ -2152,7 +2159,7 @@ __device__ void source_base_t::slope_detector_g    ( local_info_t<f_t>& local_in
                     {
                         pool_margin[srcidx * n_point_max + idx_cross_p].next_idx[j_test_p[0]] = idx_cross_p;
                         pool_margin[srcidx * n_point_max + idx_cross_p].next_j[j_test_p[0]] = j_test_p[1];
-
+                        // printf("idx_p: %d, j0: %d, j1: %d\n",idx_cross_p,j_test_p[0],j_test_p[1]);
                         // if(ghost_direction)
                         // {
                         //     srcs[srcidx].idx_cross[i] = idx_cross_p;
@@ -2214,7 +2221,7 @@ __device__ void source_base_t::slope_detector_g    ( local_info_t<f_t>& local_in
                         for(int prevj=0;prevj<5;prevj++)
                         {
                             // prev_pt_idx = PrevSrcIdx(srcs[srcidx].margin_pts, idx_change[0]);
-                            prev_pt_idx = prev_src_idx_local_g(idx_change[0], local_info, blockIdx.x);
+                            prev_pt_idx = prev_src_idx_g(idx_change[0], blockIdx.x);
                             if((pool_margin[srcidx * n_point_max + prev_pt_idx].next_idx[prevj] == prev_pt_idx) && (pool_margin[srcidx * n_point_max + prev_pt_idx].next_j[prevj] == j0[0]))
                             {
                                 prev_pt_j = prevj;
@@ -2227,7 +2234,7 @@ __device__ void source_base_t::slope_detector_g    ( local_info_t<f_t>& local_in
                         for(int prevj=0;prevj<5;prevj++)
                         {
                             // prev_pt_idx = NextSrcIdx(srcs[srcidx].margin_pts, idx_change[0]);
-                            prev_pt_idx = next_src_idx_local_g(idx_change[0], local_info, blockIdx.x);   
+                            prev_pt_idx = next_src_idx_g(idx_change[0], blockIdx.x);   
                             if((pool_margin[srcidx * n_point_max + prev_pt_idx].next_idx[prevj] == prev_pt_idx) && (pool_margin[srcidx * n_point_max + prev_pt_idx].next_j[prevj] == j0[0]))
                             {
                                 prev_pt_j = prevj;
@@ -2270,6 +2277,19 @@ __device__ void source_base_t::slope_detector_g    ( local_info_t<f_t>& local_in
                     pool_margin[srcidx * n_point_max + idx_change[iii]].deltaS_Err[j0[iii]] = 0;
                     pool_margin[srcidx * n_point_max + idx_change[iii]].deltaS_Err[j1[iii]] = 0;
 
+                    if(j0[iii]!=2 && j0[iii]!=3)
+                    {
+                        local_info.shared_info->Break = true;
+                        printf("j0 not 2 or 3!\n");
+                        return;
+                    }
+                    if(j1[iii]!=2 && j1[iii]!=3)
+                    {
+                        local_info.shared_info->Break = true;
+                        printf("j1 not 2 or 3!\n");
+                        return;
+                    }
+
                     // pool_margin[srcidx * n_point_max + idx_change[iii]].deltaS_new[j0[iii]] = 0;
                     // pool_margin[srcidx * n_point_max + idx_change[iii]].deltaS_new[j1[iii]] = 0;
                     // pool_margin[srcidx * n_point_max + idx_change[iii]].Err_new[j0[iii]] = 0;
@@ -2306,10 +2326,11 @@ __device__ void source_base_t::slope_detector_g    ( local_info_t<f_t>& local_in
                 idx_cross_p = idx_change[0];        // 前面拿过了
                 posi_p[0] = pool_margin[srcidx * n_point_max + idx_cross_p].images[j0[0]].position;
                 posi_p[1] = pool_margin[srcidx * n_point_max + idx_cross_p].images[j1[0]].position;
-                                        
+                // printf("idx_change[0]: %d, j0[0]: %d, j1[0]: %d\n",idx_change[0], j0[0],j1[0]);
 
-                idx_cross_g = (ghost_direction) ? next_src_idx_local_g(idx_cross_p, local_info, blockIdx.x) \
-                                                : prev_src_idx_local_g(idx_cross_p, local_info, blockIdx.x) ;
+                idx_cross_g = (ghost_direction) ? next_src_idx_g(idx_cross_p, blockIdx.x) \
+                                                : prev_src_idx_g(idx_cross_p, blockIdx.x) ;
+                // printf("idx_p: %d, idx_g inv: %d\n",idx_cross_p,idx_cross_g);
                 idx_change[iter_i] = idx_cross_g;
 
                 // n_ghost=0;
@@ -2324,7 +2345,13 @@ __device__ void source_base_t::slope_detector_g    ( local_info_t<f_t>& local_in
                 // }           // 这个不用检查了，实际上前半截已经算过了，只是没存，该报的错都报了
                 posi_g[0] = pool_margin[srcidx * n_point_max + idx_cross_g].images[2].position;
                 posi_g[1] = pool_margin[srcidx * n_point_max + idx_cross_g].images[3].position;
-
+                j_test_g[0] = 2;
+                j_test_g[1] = 3;
+                if(pool_margin[srcidx * n_point_max + idx_cross_g].images[2].physical || pool_margin[srcidx * n_point_max + idx_cross_g].images[3].physical)
+                {
+                    local_info.shared_info->Break = true;
+                    return;
+                }
 
                 posi_p[0] = posi_p[1] - posi_p[0];      // vector between two points
                 posi_g[0] = posi_g[1] - posi_g[0];
@@ -2342,6 +2369,7 @@ __device__ void source_base_t::slope_detector_g    ( local_info_t<f_t>& local_in
                 tempbool = (temp>0);
                 j0[iter_i] = j_test_g[int(!tempbool)];
                 j1[iter_i] = j_test_g[int( tempbool)];
+                // printf("idx_g: %d, j0: %d, j1: %d\n",idx_cross_g, j_test_g[int(!tempbool)],j_test_g[int( tempbool)]);
 
                 cos2 = (temp*temp) / (norms[iter_i-1]*norms[iter_i]);
                 if(cos2<=0.1){test_pass = true;}
@@ -2359,8 +2387,9 @@ __device__ void source_base_t::slope_detector_g    ( local_info_t<f_t>& local_in
                     iter_i++;
                     if(iter_i == n_th+1){break;}
                     idx_cross_p = idx_cross_g;
-                    idx_cross_g = (ghost_direction) ? next_src_idx_local_g(idx_cross_p, local_info, blockIdx.x) \
-                                                    : prev_src_idx_local_g(idx_cross_p, local_info, blockIdx.x) ;
+                    idx_cross_g = (ghost_direction) ? next_src_idx_g(idx_cross_p, blockIdx.x) \
+                                                    : prev_src_idx_g(idx_cross_p, blockIdx.x) ;
+                    // printf("idx_p: %d\n",idx_cross_p);
                     idx_change[iter_i] = idx_cross_g;
 
 
@@ -2649,70 +2678,70 @@ __device__ void source_base_t::area_err_local    ( local_info_t<f_t>& local_info
     }
 }
 
-__device__ void source_base_t::area_err_local_test ( local_info_t<f_t>& local_info ) const
-{
-    if(local_info.shared_info->Break)
-        return;
-    int batchidx = local_info.batchidx;
-    bool parity;
-    f_t deltaS_out[5], deltaS_Err_out[5];
-    int idx_here = local_info.neighbor3[1];
-    int idx_prev   = local_info.neighbor3[0]; 
-    int idx_next   = local_info.neighbor3[2];
-    src_pt_t < f_t > * pt_here;
-    src_pt_t < f_t > * pt_prev;
-    src_pt_t < f_t > * pt_next;
+// __device__ void source_base_t::area_err_local_test ( local_info_t<f_t>& local_info ) const
+// {
+//     if(local_info.shared_info->Break)
+//         return;
+//     int batchidx = local_info.batchidx;
+//     bool parity;
+//     f_t deltaS_out[5], deltaS_Err_out[5];
+//     int idx_here = local_info.neighbor3[1];
+//     int idx_prev   = local_info.neighbor3[0]; 
+//     int idx_next   = local_info.neighbor3[2];
+//     src_pt_t < f_t > * pt_here;
+//     src_pt_t < f_t > * pt_prev;
+//     src_pt_t < f_t > * pt_next;
 
-    pt_here = &local_info.new_pts[ threadIdx.x ];
-    pt_prev = &local_info.pt_prev;
-    pt_next = &local_info.pt_next;
+//     pt_here = &local_info.new_pts[ threadIdx.x ];
+//     pt_prev = &local_info.pt_prev;
+//     pt_next = &local_info.pt_next;
 
 
-    if(local_info.new_pts[ threadIdx.x ].skip){ return; }
+//     if(local_info.new_pts[ threadIdx.x ].skip){ return; }
 
-    // loop3 == 0   ///////////////////
-    if(idx_prev<batchidx*n_th)
-    {
-        // positive
-        parity = 0;
-        deltaS_error_parity(deltaS_out, deltaS_Err_out, parity, idx_prev, idx_here, pt_prev, pt_here);
+//     // loop3 == 0   ///////////////////
+//     if(idx_prev<batchidx*n_th)
+//     {
+//         // positive
+//         parity = 0;
+//         deltaS_error_parity(deltaS_out, deltaS_Err_out, parity, idx_prev, idx_here, pt_prev, pt_here);
 
-        for(int output_j=3; output_j<5;output_j++)
-        {
-            pt_prev->deltaS[output_j] = deltaS_out[output_j];
-            pt_prev->deltaS_Err[output_j] = deltaS_Err_out[output_j];
-        }
-    }
+//         for(int output_j=3; output_j<5;output_j++)
+//         {
+//             pt_prev->deltaS[output_j] = deltaS_out[output_j];
+//             pt_prev->deltaS_Err[output_j] = deltaS_Err_out[output_j];
+//         }
+//     }
 
-    // loop3 == 1       ////////////////////////
+//     // loop3 == 1       ////////////////////////
 
-    // negative
-    parity = 1;                      
-    deltaS_error_parity(deltaS_out, deltaS_Err_out, parity, idx_here, idx_prev, pt_here, pt_prev);                    
-    // positive
-    parity = 0;
-    deltaS_error_parity(deltaS_out, deltaS_Err_out, parity, idx_here, idx_next, pt_here, pt_next);
+//     // negative
+//     parity = 1;                      
+//     deltaS_error_parity(deltaS_out, deltaS_Err_out, parity, idx_here, idx_prev, pt_here, pt_prev);                    
+//     // positive
+//     parity = 0;
+//     deltaS_error_parity(deltaS_out, deltaS_Err_out, parity, idx_here, idx_next, pt_here, pt_next);
 
-    for(int output_j=0; output_j<5;output_j++)
-    {
-        pt_here->deltaS[output_j] = deltaS_out[output_j];
-        pt_here->deltaS_Err[output_j] = deltaS_Err_out[output_j];
-    }
+//     for(int output_j=0; output_j<5;output_j++)
+//     {
+//         pt_here->deltaS[output_j] = deltaS_out[output_j];
+//         pt_here->deltaS_Err[output_j] = deltaS_Err_out[output_j];
+//     }
 
-    // loop3 == 2 /////////////////////
-    if(idx_next<batchidx*n_th)
-    {
-        // negative
-        parity = 1;                        
-        deltaS_error_parity(deltaS_out, deltaS_Err_out, parity, idx_next, idx_here, pt_next, pt_here);
+//     // loop3 == 2 /////////////////////
+//     if(idx_next<batchidx*n_th)
+//     {
+//         // negative
+//         parity = 1;                        
+//         deltaS_error_parity(deltaS_out, deltaS_Err_out, parity, idx_next, idx_here, pt_next, pt_here);
 
-        for(int output_j=0; output_j<3;output_j++)
-        {
-            pt_next->deltaS[output_j] = deltaS_out[output_j];
-            pt_next->deltaS_Err[output_j] = deltaS_Err_out[output_j];
-        }
-    }
-}
+//         for(int output_j=0; output_j<3;output_j++)
+//         {
+//             pt_next->deltaS[output_j] = deltaS_out[output_j];
+//             pt_next->deltaS_Err[output_j] = deltaS_Err_out[output_j];
+//         }
+//     }
+// }
 
 // __device__ void source_base_t::area_err_c_local( local_info_t<f_t>& local_info ) const
 // {

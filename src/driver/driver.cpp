@@ -33,11 +33,13 @@ void driver_t::init( const int n_srcs, const int device_num )
         auto & p_sol = vp_sol[i];
         p_sol = std::make_shared< source_base_t > (  );
         p_sol->n_src = n_src_per_stream;
+        p_sol->streamidx = i;
         p_sol->init( * p_dev );
     }
     auto & p_sol = vp_sol[vp_sol.size()-1];
     p_sol = std::make_shared< source_base_t > (  );
     p_sol->n_src = n_srcs - n_src_per_stream * ( vp_sol.size()-1 );
+    p_sol->streamidx = vp_sol.size()-1;
     p_sol->init( * p_dev );
 
     return;
