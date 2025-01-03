@@ -7,14 +7,13 @@
 # Twinkle
 A GPU-based High-efficiency binary microlensing code
 
-If you use Twinkle (or part of Twinkle) in your research work, we request citing our paper: [Wang, S. et al., 2025](https://doi.org/10.3847/1538-4365/ad9b8d).
+If you use Twinkle (or part of Twinkle) in your research work, we request citing our paper: [Wang, S. et al., 2025, ApJS](https://doi.org/10.3847/1538-4365/ad9b8d).
 
 If you incorporate Twinkle (or part of Twinkle) in your code, we request specifying it in the README file (or equivalent), including the GitHub link ( https://github.com/AsterLight0626/Twinkle ) and asking the user to cite our paper: [Wang, S. et al., 2025](https://doi.org/10.3847/1538-4365/ad9b8d).
 
 
 # CPU Version
-If you do not have suitable GPU equipment, we also provide [Twinkle_CPU](https://github.com/AsterLight0626/Twinkle_CPU). Its algorithm implementation is identical to Twinkle and will yield exactly the same results.
-
+We also provide [Twinkle_CPU](https://github.com/AsterLight0626/Twinkle_CPU) for CPU with identical algorithm as the GPU version.
 
 ---
 # 中文
@@ -27,6 +26,6 @@ If you do not have suitable GPU equipment, we also provide [Twinkle_CPU](https:/
 
 
 # CPU 版本
-如果你并没有合适的 GPU 设备，我们也提供了 [Twinkle_CPU](https://github.com/AsterLight0626/Twinkle_CPU)。它的算法实现与 Twinkle 完全相同，会给出完全一致的结果。
+我们也提供了在CPU上运行的 [Twinkle_CPU](https://github.com/AsterLight0626/Twinkle_CPU)。它的算法实现与 Twinkle 完全相同，会给出完全一致的结果。
 
 
