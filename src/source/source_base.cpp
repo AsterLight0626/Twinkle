@@ -12,10 +12,10 @@ __host__ source_base_t:: source_base_t(  )
     // n_src = 64*2*2;
     // n_src = 1;
     // n_src = 256;
-    n_src = 900;
+    n_src = 1;
 
     // Temporarily hard-coded
-    n_point_max = 512;
+    n_point_max = 4096;
     n_cross_max =  n_th;
     return;
 }
@@ -1336,6 +1336,48 @@ __device__ void source_base_t::deltaS_error_image
     return;
 }
 
+__device__ void source_base_t::deltaS_error_image_beta
+( f_t & deltaS, f_t & Error1234, const int j,
+    const src_pt_t < f_t > * pt_here, const src_pt_t < f_t > * pt_other,
+    const f_t & theta1, const f_t & theta2, const f_t & theta3) const
+{
+    f_t deltaS_t, deltaS_p1, deltaS_p2, deltaS_p;
+    f_t E_2, E_3, E_4;
+    f_t deter;
+
+    c_t zs0,zs1,dzs0,dzs1;
+    f_t wedge0,wedge1;
+    int next_j;
+
+    next_j = pt_here->next_j[j];
+    zs0 = pt_here->images[j].position;
+    zs1 = pt_other->images[next_j].position;
+    wedge0 = pt_here->wedge[j];
+    wedge1 = pt_other->wedge[next_j];
+    dzs0 = pt_here->dz[j];
+    dzs1 = pt_other->dz[next_j];
+
+    deltaS_t = delta_s_1(zs0,zs1);
+    deltaS_p1 = (wedge0 + wedge1) * theta3 /24;
+    deltaS_p2 = wedge_product((zs1-zs0) , (dzs1-dzs0)) * theta1 / 12;
+    deltaS_p = (deltaS_p1 + deltaS_p2) / 2;
+    E_4 = fabs((deltaS_p1 - deltaS_p2));
+    deter = theta2 * (dzs0*dzs1).abs(  );
+    if(fabs(deter)>2e-12){E_2 = 1.5 * fabs( deltaS_p *  ((zs0-zs1).norm2(  ) / deter -1));}
+    else
+    {
+        E_2=0;
+    }        // usually caused by numericial error
+    // mode = 0;
+    E_3 = 0.1 * fabs(deltaS_p) * theta2;
+
+    deltaS = deltaS_t + deltaS_p;
+    // deltaS = deltaS_t;
+    Error1234 = E_2 + E_3 + E_4;
+
+    return;
+}
+
 __device__ void source_base_t::deltaS_error_parity
 ( f_t * deltaS_out, f_t * deltaS_Err_out, const bool parity,
 const int here_idx, const int other_idx,
@@ -1432,6 +1474,43 @@ const src_pt_t < f_t > * pt_here ) const
     return;
 }
 
+__device__ void source_base_t::deltaS_error_cross_beta
+( f_t & deltaS, f_t & Error1234, const int j0, const int j1, const bool ghost_direction,
+const src_pt_t < f_t > * pt_here ) const
+{
+    // // gd==1, next is ghost, + connect to -, + is j0, - is j1
+    // // gd==0, prev is ghost, - connect to +, - is j0, + is j1
+    c_t zs[2];
+    c_t dzs[2];
+    f_t wedge[2];
+    // zs[0] connect to zs[1]
+    zs[0] = pt_here->images[j0].position;
+    zs[1] = pt_here->images[j1].position;
+    wedge[0] = pt_here->wedge[j0];
+    wedge[1] = pt_here->wedge[j1];
+    dzs[0] = pt_here->dz[j0];
+    dzs[1] = pt_here->dz[j1];                  
+
+    f_t deltaS_t = delta_s_1(zs[0],zs[1]);
+    f_t theta1 = (zs[1]-zs[0]).abs(  ) / sqrt((dzs[0]*dzs[1]).abs(  ));
+    f_t theta2 = theta1*theta1;
+    f_t theta3 = theta2*theta1;
+    int plus = int(!ghost_direction);
+    int minus = int(ghost_direction);
+    f_t deltaS_p1 = (wedge[plus] - wedge[minus]) * theta3 /24;
+    f_t deltaS_p2 = wedge_product((zs[1]-zs[0]) , (dzs[1]+dzs[0])) * theta1 / 12;
+    f_t deltaS_p = (deltaS_p1 + deltaS_p2) / 2;
+    f_t E_1 = fabs(wedge[plus] + wedge[minus]) * theta3 / 48;
+    c_t temp0 = (zs[plus]-zs[minus])*(dzs[plus]-dzs[minus]);
+    f_t temp1 = 2* (zs[plus]-zs[minus]).abs(  ) * sqrt((dzs[plus]*dzs[minus]).abs(  ));
+    temp0 = ( (ghost_direction==1) ? temp0 + temp1 : temp0 - temp1);
+    f_t E_2 = 1.5* (temp0).abs(  ) * theta1;
+    f_t E_3 = 0.1 * fabs(deltaS_p) * theta2;
+    f_t E_4 = fabs((deltaS_p1 - deltaS_p2));
+    deltaS = deltaS_t+deltaS_p;
+    Error1234 = E_2+E_3+E_4;
+    return;
+}
 
 __device__ int source_base_t::bisearch_left
 (const f_t* values_in_order, const f_t to_insert, const int len) const
@@ -1798,53 +1877,6 @@ __device__ void source_base_t::connect_next_local( local_info_t<f_t>& local_info
     }
     // local_info.src_ext.Break = fail;
 }
-
-// __device__ void source_base_t::connect_next_local_test( local_info_t<f_t>& local_info ) const
-// {
-//     // if(local_info.src_ext.Break)
-//     //     return;
-//     int batchidx = local_info.batchidx;
-//     int prev_idx = local_info.neighbor3[0]; 
-//     int idx = local_info.neighbor3[1];
-//     int next_idx = local_info.neighbor3[2];
-
-//     if( local_info.new_pts[ threadIdx.x ].skip ){return;}
-
-//     int next_idx_out[5];
-//     int next_j_out[5];
-//     int Nphys_prev, Nphys_here, Nphys_next;
-//     src_pt_t < f_t > * pt_here;
-//     src_pt_t < f_t > * pt_prev;
-//     src_pt_t < f_t > * pt_next;
-
-//     pt_here = &local_info.new_pts[ threadIdx.x ];
-//     pt_prev = &local_info.pt_prev;
-//     pt_next = &local_info.pt_next;
-
-
-//     Nphys_prev = pt_prev->Nphys;
-//     Nphys_here = pt_here->Nphys;
-//     Nphys_next = pt_next->Nphys;
-
-
-//     bool fail = false;
-
-
-//     int* Ncross_ptr = &local_info.shared_info->Ncross;
-
-//     int temp0;
-//     fail = false;
-//     // 记录跨焦散位置
-//     printf("previous temp0: %d, blockIdx: %d, threadIdx: %d\n",*Ncross_ptr,blockIdx.x, threadIdx.x);
-
-//     temp0 = atomicAdd(Ncross_ptr,1);
-
-//     printf("temp0: %d, blockIdx: %d, threadIdx: %d\n",temp0,blockIdx.x, threadIdx.x);
-
-//     // if(fail)
-//     //     printf("srcidx: %d, idx: %d\n",blockIdx.x, threadIdx.x);
-
-// }
 
 
 __device__ void source_base_t::slope_test_local  (local_info_t<f_t>& local_info ) const
@@ -2678,116 +2710,6 @@ __device__ void source_base_t::area_err_local    ( local_info_t<f_t>& local_info
     }
 }
 
-// __device__ void source_base_t::area_err_local_test ( local_info_t<f_t>& local_info ) const
-// {
-//     if(local_info.shared_info->Break)
-//         return;
-//     int batchidx = local_info.batchidx;
-//     bool parity;
-//     f_t deltaS_out[5], deltaS_Err_out[5];
-//     int idx_here = local_info.neighbor3[1];
-//     int idx_prev   = local_info.neighbor3[0]; 
-//     int idx_next   = local_info.neighbor3[2];
-//     src_pt_t < f_t > * pt_here;
-//     src_pt_t < f_t > * pt_prev;
-//     src_pt_t < f_t > * pt_next;
-
-//     pt_here = &local_info.new_pts[ threadIdx.x ];
-//     pt_prev = &local_info.pt_prev;
-//     pt_next = &local_info.pt_next;
-
-
-//     if(local_info.new_pts[ threadIdx.x ].skip){ return; }
-
-//     // loop3 == 0   ///////////////////
-//     if(idx_prev<batchidx*n_th)
-//     {
-//         // positive
-//         parity = 0;
-//         deltaS_error_parity(deltaS_out, deltaS_Err_out, parity, idx_prev, idx_here, pt_prev, pt_here);
-
-//         for(int output_j=3; output_j<5;output_j++)
-//         {
-//             pt_prev->deltaS[output_j] = deltaS_out[output_j];
-//             pt_prev->deltaS_Err[output_j] = deltaS_Err_out[output_j];
-//         }
-//     }
-
-//     // loop3 == 1       ////////////////////////
-
-//     // negative
-//     parity = 1;                      
-//     deltaS_error_parity(deltaS_out, deltaS_Err_out, parity, idx_here, idx_prev, pt_here, pt_prev);                    
-//     // positive
-//     parity = 0;
-//     deltaS_error_parity(deltaS_out, deltaS_Err_out, parity, idx_here, idx_next, pt_here, pt_next);
-
-//     for(int output_j=0; output_j<5;output_j++)
-//     {
-//         pt_here->deltaS[output_j] = deltaS_out[output_j];
-//         pt_here->deltaS_Err[output_j] = deltaS_Err_out[output_j];
-//     }
-
-//     // loop3 == 2 /////////////////////
-//     if(idx_next<batchidx*n_th)
-//     {
-//         // negative
-//         parity = 1;                        
-//         deltaS_error_parity(deltaS_out, deltaS_Err_out, parity, idx_next, idx_here, pt_next, pt_here);
-
-//         for(int output_j=0; output_j<3;output_j++)
-//         {
-//             pt_next->deltaS[output_j] = deltaS_out[output_j];
-//             pt_next->deltaS_Err[output_j] = deltaS_Err_out[output_j];
-//         }
-//     }
-// }
-
-// __device__ void source_base_t::area_err_c_local( local_info_t<f_t>& local_info ) const
-// {
-//     if(local_info.shared_info->Break)
-//         return;
-//     const int Ncross = local_info.shared_info->Ncross;
-//     if(threadIdx.x >= Ncross){return;}
-
-//     cross_info_t * cross_info = local_info.cross_info;
-//     if(cross_info[ threadIdx.x ].additional){return;}
-
-//     src_pt_t <f_t> * pt_here;
-//     int batchidx = local_info.batchidx;
-//     // const int srcidx = blockIdx.x;
-//     int idx;        // physical
-//     bool ghost_direction;     // 1 means next, 0 means previous
-//     idx = cross_info[ threadIdx.x ].idx_cross;
-//     // ghost_direction = ( (idx<0) ? 0 : 1);
-
-
-//     if((idx < batchidx*n_th))
-//     {
-//         local_info.shared_info->in_global = true;
-//         return;
-//     }
-
-//     pt_here = &local_info.new_pts[ idx - batchidx*n_th ];
-
-    
-//     // pt_here = ( (idx >= batchidx*n_th) ? &local_info.new_pts[ idx - batchidx*n_th ] : &pool_margin[ srcidx * n_point_max + idx ] );
-
-
-//     int j_test_p[2];
-//     j_test_p[0] = cross_info[ threadIdx.x ].j_cross;
-//     // j_test_p[1] = pt_here->next_j[j_test_p[0]];
-//     j_test_p[1] = cross_info[ threadIdx.x ].j1;
-//     ghost_direction = (j_test_p[0]>=3);
-//     if(pt_here->images[j_test_p[0]].physical)
-//     {
-//         f_t deltaS, E123;
-//         deltaS_error_cross(deltaS, E123, j_test_p[0], j_test_p[1], ghost_direction, pt_here);
-//         pt_here->deltaS[j_test_p[0]]= deltaS;
-//         pt_here->deltaS_Err[j_test_p[0]]= E123;
-//     }
-// }
-
 __device__ void source_base_t::sum_area_0_g  ( local_info_t<f_t>& local_info ) const
 {
     f_t* deltaS = (f_t*) local_info.deltaS_sum;
@@ -2943,166 +2865,6 @@ __device__ void source_base_t::sum_area_0_g  ( local_info_t<f_t>& local_info ) c
         
     }
 }
-
-// __device__ void source_base_t::sum_area_0_g_test  ( local_info_t<f_t>& local_info ) const
-// {
-//     f_t* deltaS = (f_t*) local_info.deltaS_sum;
-//     f_t* Err = (f_t*) local_info.Err_sum;
-
-//     const int batchidx = local_info.batchidx;
-//     const int idx = threadIdx.x;
-//     const int i_src = blockIdx.x;
-//     int nextsrc_idx;
-//     int sum_length = 2;
-//     const int sum_size = (batchidx+1) * n_th;
-
-
-//     f_t temp_deltaS;
-//     f_t temp_Err;
-//     int pointidx;
-//     auto & ex_info = local_info.src_ext;
-//     auto & ret_info = local_info.src_ret;
-//     if(local_info.shared_info->Break)
-//     {
-
-//         ex_info.SolveSucceed = false;
-//         // if(!muted)
-//         // {
-//         //     printf("srcidx: %d: fail, break\n",srcidx);
-//         // }
-        
-//         // ret_info.mag = -1;
-//         // ret_info.err = -1;
-//         // ex_info.Area = -0;
-//         // ex_info.Err_A = -0;
-
-//         return;
-//     }
-
-//     if(ex_info.SolveSucceed == false){
-
-//         deltaS[idx] = 0;
-//         Err[idx] = 0;
-
-//         // new update
-
-//         pointidx = local_info.neighbor3[ 0 ]; 
-//         if(pointidx < batchidx*n_th)
-//         {
-//             for(int j=3;j<5;j++)
-//             {
-//                 pool_margin[i_src * n_point_max + pointidx].deltaS_Err[j] = local_info.pt_prev.deltaS_Err[j];
-//                 pool_margin[i_src * n_point_max + pointidx].deltaS[j] = local_info.pt_prev.deltaS[j];
-//             }            
-//         }
-//         pointidx = local_info.neighbor3[ 1 ];
-//         if(pointidx < batchidx*n_th)
-//         {
-//             printf("srcidx: %d, pointidx: %d\n",blockIdx.x, threadIdx.x);
-//         }
-//         // for(int j=0;j<5;j++)
-//         // {
-//         //     pool_margin[i_src * n_point_max + pointidx].deltaS_Err[j] = local_info.new_pts[ pointidx - batchidx*n_th ].deltaS_Err[j];
-//         //     pool_margin[i_src * n_point_max + pointidx].deltaS[j] = local_info.new_pts[ pointidx - batchidx*n_th ].deltaS[j];
-//         // }
-//         pointidx = local_info.neighbor3[ 2 ];
-//         if(pointidx<batchidx*n_th)
-//         {
-//             for(int j=0;j<3;j++)
-//             {
-//                 pool_margin[i_src * n_point_max + pointidx].deltaS_Err[j] = local_info.pt_next.deltaS_Err[j];
-//                 pool_margin[i_src * n_point_max + pointidx].deltaS[j] = local_info.pt_next.deltaS[j];
-//             }
-//         }
-   
-
-
-//         // __syncthreads();
-
-
-//         // for(int i=0;i<(batchidx+1);i++)        // ceil(NPOINTS / n_th)
-//         // {
-//         //     pointidx = i*n_th + idx;
-//         //     if(pointidx >= sum_size){continue;}
-
-//         //     if(!pool_margin[i_src * n_point_max + pointidx].skip)
-//         //     {
-//         //         temp_deltaS = 0;
-//         //         temp_Err = 0;
-//         //         if(pointidx < batchidx*n_th)
-//         //         {
-//         //             nextsrc_idx = next_src_idx_g( pointidx , i_src );
-//         //         }
-//         //         else
-//         //         {
-//         //             nextsrc_idx = local_info.neighbor3[2];
-//         //         }
-                
-//         //         src_pt_t < f_t > * pt_pointidx;
-//         //         src_pt_t < f_t > * pt_nextsrc_idx;
-//         //         pt_pointidx = ( (pointidx < batchidx*n_th) ? &pool_margin[i_src * n_point_max + pointidx] : &local_info.new_pts[ pointidx - batchidx*n_th ] );
-//         //         pt_nextsrc_idx = ( (nextsrc_idx < batchidx*n_th) ? &pool_margin[i_src * n_point_max + nextsrc_idx] : &local_info.new_pts[ nextsrc_idx - batchidx*n_th ] );
-            
-//         //         // pt_pointidx = &pool_margin[i_src * n_point_max + pointidx];
-//         //         // pt_nextsrc_idx = &pool_margin[i_src * n_point_max + nextsrc_idx];
-
-//         //         for(int j=3;j<5;j++)
-//         //         {
-//         //             temp_deltaS += pt_pointidx->deltaS[j];
-//         //             temp_Err += pt_pointidx->deltaS_Err[j];
-//         //         }
-
-//         //         for(int j=0;j<3;j++)
-//         //         {
-//         //             temp_deltaS += pt_nextsrc_idx->deltaS[j];
-//         //             temp_Err += pt_nextsrc_idx->deltaS_Err[j];
-//         //         }
-//         //         pool_margin[i_src * n_point_max + pointidx].error_interval = temp_Err;
-//         //         pool_margin[i_src * n_point_max + pointidx].area_interval = temp_deltaS;
-//         //         deltaS[idx] += temp_deltaS;
-//         //         Err[idx] += temp_Err;
-//         //     }
-//         //     else
-//         //     {
-//         //         pool_margin[i_src * n_point_max + pointidx].error_interval = 0;
-//         //         pool_margin[i_src * n_point_max + pointidx].area_interval = 0;
-//         //     }
-
-
-//         // }
-
-
-//         // __syncthreads();
-
-
-
-//         // while(sum_length<(n_th*2))
-//         // {
-//         //     if(((idx & (sum_length-1))==0) && ((idx + sum_length/2) < n_th))    // sum_length = 2^n, idx%sum_length = idx & (sum_length-1)
-//         //     {
-//         //         deltaS[idx] += deltaS[idx + sum_length/2];
-//         //         Err[idx] += Err[idx + sum_length/2];
-//         //     }
-
-//         //     sum_length *= 2;
-//         //     __syncthreads();
-//         // }
-//         // // if(idx == 0)
-//         // // {
-//         // ret_info.mag = fabs(deltaS[0]) / local_info.src_shape.src_area;
-//         // ret_info.err = Err[0] / local_info.src_shape.src_area;
-//         // ex_info.Area = deltaS[0];
-//         // ex_info.Err_A = Err[0];
-
-//         // if(Err[0]/fabs(deltaS[0])<=RelTol+RelErrAllowed)
-//         // {
-//         //     ex_info.SolveSucceed = true;
-//         // }
-
-//         // }
-        
-//     }
-// }
 
 __device__ void source_base_t::sum_area_3_local ( local_info_t<f_t>& local_info ) const
 {
@@ -3391,28 +3153,6 @@ __host__ void source_base_t::run( device_t & f_dev )
     lpar = std::make_tuple
         ( dim3( n_bl ), dim3( n_th ), s_sh );
     f_dev.launch( solve_extended_sh, lpar, stream, ( * this ) );
-
-
-    // n_bl = n_src;
-    // lpar = std::make_tuple
-    //     ( dim3( n_bl ), dim3( n_th ), s_sh );
-    // f_dev.launch( boundaryset_solve_connect, lpar, stream, ( * this ) );
-
-    // n_bl = ( n_src + n_th - 1 ) / n_th;
-    // lpar = std::make_tuple
-    //     ( dim3( n_bl ), dim3( n_th ), s_sh );
-    // f_dev.launch( slope_detector, lpar, stream, ( * this ) );
-
-    // n_bl = n_src;
-    // lpar = std::make_tuple
-    //     ( dim3( n_bl ), dim3( n_th ), s_sh );
-    // f_dev.launch( area_normal, lpar, stream, ( * this ) );
-
-    // n_bl = n_src; 
-    // // s_sh = 2*sizeof(f_t)* n_th;
-    // lpar = std::make_tuple
-    //     ( dim3( n_bl ), dim3( n_th ), s_sh );
-    // f_dev.launch( sum_area, lpar, stream, ( * this ) );
 
 
     return;

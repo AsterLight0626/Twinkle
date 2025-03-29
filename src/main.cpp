@@ -3,10 +3,6 @@
 #include <string>
 #include "driver/driver.h"
 #include <fstream>
-#include "source/types/point_img.h"
-#include "source/types/point_src.h"
-#include "source/types/extended_src.h"
-// #include "source/types/sh_manager.h"
 
 ////////////////////////////////////////////////////////////
 // 
@@ -15,7 +11,6 @@ int main()
 {
     static const int Nsrcs = 1000;
 
-    // coordinates of sources center
     double xs[Nsrcs];
     double ys[Nsrcs];
     for(int idx=0;idx<Nsrcs;idx++)
@@ -28,23 +23,21 @@ int main()
     double rho = 1e-4;
     double RelTol = 1e-4;
 
-    // set number of streams
+
     int n_stream = 10;
-    twinkle::driver_t driver( n_stream );
+    // twinkle::driver_t driver( n_stream );
+    twinkle::driver_t driver;
 
-    // set device, allocate memory space
-    int device_num = 0;
-    driver.init( Nsrcs, device_num );
-
-    // set parameters
+    int device_num = 2;
+    driver.init( Nsrcs, device_num, n_stream );
     driver.set_params(ss,qq,rho,RelTol,xs,ys);
 
-    // solve magnification
-    driver.run (  );
-    driver.p_dev->sync_all_streams(  );        
+    driver.run (  );   
 
     double magnification[Nsrcs];
     driver.return_mag_to(magnification);
+
+    printf("mag[0]: %.16f\n",magnification[0]);
 
     driver.free();
 

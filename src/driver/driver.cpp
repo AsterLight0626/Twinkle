@@ -6,21 +6,26 @@ namespace twinkle
 //
 
 
-driver_t::driver_t( const int n_stream )
+driver_t::driver_t(  )
 {
     // #warning "TEST"
-    vp_sol.resize( n_stream );
+    // vp_sol.resize( n_stream );
+    // printf("driver created!\n");
     return;
 }
 
 driver_t::~driver_t(  )
 {
     p_dev->finalize(  );
+    // printf("deleted!\n");
     return;
 }
 
-void driver_t::init( const int n_srcs, const int device_num )
+void driver_t::init( const int n_srcs, const int device_num, const int n_stream)
 {
+
+    vp_sol.resize( n_stream );
+
     n_srcs_all = n_srcs;
     p_dev = std::make_shared< device_t > (  );
     p_dev-> init   ( device_num );
@@ -45,23 +50,23 @@ void driver_t::init( const int n_srcs, const int device_num )
     return;
 }
 
-void driver_t::set_params_2D( double ss, double qq, double rho, double xmax, double xmin, double ymax, double ymin, int Nx, int Ny )
-{
-    for( auto & p_sol : vp_sol )
-    {
-        p_sol->set_params_2D( * p_dev, ss, qq, rho, xmax, xmin, ymax, ymin, Nx, Ny );
-    }
-    return;
-}
+// void driver_t::set_params_2D( double ss, double qq, double rho, double xmax, double xmin, double ymax, double ymin, int Nx, int Ny )
+// {
+//     for( auto & p_sol : vp_sol )
+//     {
+//         p_sol->set_params_2D( * p_dev, ss, qq, rho, xmax, xmin, ymax, ymin, Nx, Ny );
+//     }
+//     return;
+// }
 
-void driver_t::set_params_1D( double ss, double qq, double rho, double xmax, double xmin, double ymax, double ymin, int Nsrc )
-{
-    for( auto & p_sol : vp_sol )
-    {
-        p_sol->set_params_1D( * p_dev, ss, qq, rho, xmax, xmin, ymax, ymin, Nsrc );
-    }
-    return;
-}
+// void driver_t::set_params_1D( double ss, double qq, double rho, double xmax, double xmin, double ymax, double ymin, int Nsrc )
+// {
+//     for( auto & p_sol : vp_sol )
+//     {
+//         p_sol->set_params_1D( * p_dev, ss, qq, rho, xmax, xmin, ymax, ymin, Nsrc );
+//     }
+//     return;
+// }
 
 void driver_t::set_params( double ss, double qq, double rho, double RELTOL, double* xs, double* ys )
 {
@@ -106,6 +111,7 @@ void driver_t::free(  )
 {
     for( auto & p_sol : vp_sol )    
         p_sol->free( * p_dev );
+
     return;
 }
 
@@ -116,7 +122,7 @@ void driver_t::run(  )
 {
     for( auto & p_sol : vp_sol )    
         p_sol-> run ( *  p_dev );
-    // p_dev->sync_all_streams(   );
+    p_dev->sync_all_streams(   );
     return;
 }
 

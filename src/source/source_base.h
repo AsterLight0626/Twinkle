@@ -26,27 +26,10 @@ __global__ void point_approximation( const src_T src )
     return src.solve_point_approx(  );
 }
 
-template< class src_T >
-__global__ void boundaryset_solve_connect( const src_T src )
-{
-    src.margin_set      (  );
-    src.margin_solve    (  );
-    __syncthreads(); 
-    // src.connect_next    (  );
-}
 
 template< class src_T >
 __global__ void solve_extended_sh( const src_T src )      // 不用 const 因为 batchidx 会修改，但也可能不需要？在这里面就行？
 {
-    // __shared__ char dat_sh[16384];
-    // __shared__ char dat_sh
-    // [ sizeof(src_ext_t< float2_t >)
-    // + sizeof(src_shape_t< float2_t >)
-    // + sizeof(src_ret_t< float2_t >)
-    // + sizeof(cross_info_t) * 64
-    // + sizeof(src_pt_t< float2_t >) * 32 * 3
-    //  ];       // 32 是 n_th, 不过动态可能也支持？
-    // float: 28496, double: 50848
     __dyn_shared__( char, dat_sh );
 
     const int i_src = blockIdx.x;
@@ -66,7 +49,6 @@ __global__ void solve_extended_sh( const src_T src )      // 不用 const 因为
 
     if( threadIdx.x == 0 )
     {
-        // local_info.shared_info->SolveSucceed = local_info.src_ext.SolveSucceed;
         local_info.shared_info->Break = local_info.src_ext.Break;
     }
     __syncthreads();
@@ -99,11 +81,6 @@ __global__ void solve_extended_sh( const src_T src )      // 不用 const 因为
 
         if(local_info.shared_info->Ncross > 0  && (!local_info.shared_info->Break))
         {
-            // if(threadIdx.x==0)
-            // {
-            //     printf("streamidx: %d, srcidx: %d, batchidx: %d\n",src.streamidx,blockIdx.x, bcidx);
-            //     printf("cross idx: %d\n",local_info.cross_info[ 0 ].idx_cross);
-            // }
             {
                 // shared neighbor02 to global
                 if( local_info.neighbor3[0] < local_info.batchidx * src.n_th )
@@ -193,132 +170,6 @@ __global__ void solve_extended_sh( const src_T src )      // 不用 const 因为
         local_info.batchidx += 1;
     }
 
-
-        // __syncthreads();
-
-        // if((local_info.src_ext.SolveSucceed)||(local_info.shared_info->Break))
-        // {
-        //     if(threadIdx.x==0 && local_info.shared_info->Break)
-        //     {
-        //         printf("break!: srcidx: %d, succeed: %d, Breal: %d\n",blockIdx.x,local_info.src_ext.SolveSucceed,local_info.shared_info->Break);                
-        //     }
-        //     if(blockIdx.x==48 && src.streamidx==3)
-        //     {
-        //         printf("break\n");
-        //     }
-            
-        // }
-        // else
-        // {
-        //     src.adap_set_g( local_info );
-        //     __syncthreads();
-
-        //     src.margin_solve_local( local_info );
-        //     __syncthreads();
-        //     src.neighbor3_info_g( local_info );         // g 只体现在读入相邻旧点的 src_pt 上, 可以依据 skip 情况直接修改局域的 prev/next_src_idx
-        //     __syncthreads(); 
-        //     src.connect_next_local( local_info );
-        //     __syncthreads();
-        //     // if(blockIdx.x==48 && threadIdx.x==0)
-        //     // {
-        //     //     printf("streamidx: %d, srcidx: %d, batchidx: last\n",src.streamidx,blockIdx.x);
-        //     //     printf("Ncross")
-        //     //     printf("cross idx: %d\n",local_info.cross_info[ 0 ].idx_cross);
-        //     //     // int crossidx = local_info.cross_info[ 0 ].idx_cross;
-        //     //     printf("378 Q: %.16f\n",local_info.new_pts[58].Q);
-        //     //     printf("379 Q: %.16f\n",local_info.new_pts[59].Q);
-        //     //     printf("379 Nphys: %d\n",local_info.new_pts[59].Nphys);
-        //     //     auto & images = local_info.new_pts[59].images;
-        //     //     printf("images: 0: (%.16f, %.16f), 1: (%.16f, %.16f), 2: (%.16f, %.16f), 3: (%.16f, %.16f), 4: (%.16f, %.16f),\n",
-        //     //     images[0].position.re, images[0].position.im,
-        //     //     images[1].position.re, images[1].position.im,
-        //     //     images[2].position.re, images[2].position.im,
-        //     //     images[3].position.re, images[3].position.im,
-        //     //     images[4].position.re, images[4].position.im);
-
-        //     //     printf("prev of 312: %d\n",src.pool_margin[i_src * src.n_point_max + 312].prev_src_idx);
-        //     //     printf("prev of 312: %d\n",src.prev_src_idx_local_g(312, local_info, blockIdx.x));              
-        //     // }
-
-
-
-        //     if( threadIdx.x == 0 )
-        //     {
-        //         local_info.shared_info->Ncross = 0;
-        //         local_info.shared_info->deltaS_cross_global = 0;
-        //         local_info.shared_info->Err_cross_global = 0;
-        //     }
-        //     __syncthreads();
-        //     src.slope_test_local( local_info );
-        //     __syncthreads();  
-        //     if(local_info.shared_info->Ncross > 0  && (!local_info.shared_info->Break))
-        //     {
-        //         if(threadIdx.x==0)
-        //         {
-        //             printf("streamidx: %d, srcidx: %d, batchidx: last\n",src.streamidx,blockIdx.x);
-        //             printf("cross idx: %d\n",local_info.cross_info[ 0 ].idx_cross);
-        //         }      
-        //     }
-
-        //     if(true)
-        //     {
-        //         src.area_err_local( local_info );           
-        //     }
-        //     // else
-        //     // {
-        //     //     src.area_err_local_test( local_info );
-        //     // }
-        //     __syncthreads();  
-            
-        //     // shared neighbor02 to global
-        //     if(! local_info.new_pts[ threadIdx.x ].skip)
-        //     {
-        //         if( local_info.neighbor3[0] < local_info.batchidx * src.n_th )
-        //         {
-        //             // {src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]] = local_info.pt_prev;}
-        //             for(int j=3;j<5;j++)
-        //             {
-        //                 src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].deltaS[j] = local_info.pt_prev.deltaS[j];
-        //                 src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].deltaS_Err[j] = local_info.pt_prev.deltaS_Err[j];
-        //                 src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].next_idx[j] = local_info.pt_prev.next_idx[j];
-        //                 src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].next_j[j] = local_info.pt_prev.next_j[j];
-        //             }
-        //             src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].area_interval = local_info.pt_prev.area_interval;
-        //             src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].error_interval = local_info.pt_prev.error_interval;
-        //             // src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].next_src_idx = local_info.pt_prev.next_src_idx;       // adap 里面已经把 global 的信息改好了
-        //         }
-        //         src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[1]] = local_info.new_pts[ threadIdx.x ];
-        //         if( local_info.neighbor3[2] < local_info.batchidx * src.n_th )
-        //         {
-        //             // {src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]] = local_info.pt_next;}
-        //             for(int j=0;j<3;j++)
-        //             {
-        //                 src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].deltaS[j] = local_info.pt_next.deltaS[j];
-        //                 src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].deltaS_Err[j] = local_info.pt_next.deltaS_Err[j];
-        //                 src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].next_idx[j] = local_info.pt_next.next_idx[j];
-        //                 src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].next_j[j] = local_info.pt_next.next_j[j];
-        //             }
-        //             // src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].prev_src_idx = local_info.pt_next.prev_src_idx;
-        //         }
-        //     }
-        //     else
-        //     {
-        //         printf("local_info.neighbor3[1]: %d, Break: %d\n",local_info.neighbor3[1], local_info.shared_info->Break);
-        //         src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[1]] = local_info.new_pts[ threadIdx.x ];
-        //     }
-
-        //     __syncthreads();
-        //     // shared neighbor02 to global
-
-        //     {
-        //         src.sum_area_0_g( local_info );
-        //         __syncthreads();
-        //     }
-
-        // }
-
-
-
     __syncthreads();
     if(threadIdx.x == 0)                // 最后才输出
     {
@@ -397,6 +248,7 @@ public:
     f_t    RelTol;
     f_t        m1;
     f_t        m2;
+    f_t        a1;          // for linear limb darkening
     // int  batchidx;
     
     ////////// Device-side interfaces //////////
@@ -463,14 +315,6 @@ public:
     __device__ int next_src_idx_local_g
     ( const int idx_here, local_info_t<f_t>& local_info, const int srcidx ) const;    
 
-    // __device__ void load_posi
-    // ( src_pt_t < f_t > & pt_here, const src_pt_t < f_t > & pt_prev, const src_pt_t < f_t > & pt_next,
-    //  c_t * posi_here_even, c_t * posi_here_odd, c_t * posi_prev, c_t * posi_next,
-    //  int * j_here_even, int * j_here_odd, int * j_prev, int * j_next,
-    //  const int loop3, const int prev_idx, const int next_idx) const; 
-
-    // __device__ void load_posi_parity
-    // ( const src_pt_t < f_t > & pt, )
 
     __device__ void connect_order
     ( const c_t* posi_here, const c_t* posi_other, int len_here, int len_other, int* order) const;
@@ -505,12 +349,19 @@ public:
     ( f_t & deltaS, f_t & Error1234, const int j,
     const src_pt_t < f_t > * pt_here, const src_pt_t < f_t > * pt_other,
     const f_t & theta1, const f_t & theta2, const f_t & theta3) const;
+    __device__ void deltaS_error_image_beta
+    ( f_t & deltaS, f_t & Error1234, const int j,
+    const src_pt_t < f_t > * pt_here, const src_pt_t < f_t > * pt_other,
+    const f_t & theta1, const f_t & theta2, const f_t & theta3) const;
     __device__ void deltaS_error_parity
     ( f_t * deltaS_new_out, f_t * Err_new_out, const bool parity,
     const int here_idx, const int other_idx,
     const src_pt_t < f_t > * pt_here, const src_pt_t < f_t > * pt_other)    const;
 
     __device__ void deltaS_error_cross
+    ( f_t & deltaS, f_t & Error1234, const int j0, const int j1, const bool ghost_direction,
+    const src_pt_t < f_t > * pt_here ) const;
+    __device__ void deltaS_error_cross_beta
     ( f_t & deltaS, f_t & Error1234, const int j0, const int j1, const bool ghost_direction,
     const src_pt_t < f_t > * pt_here ) const;
 
@@ -533,20 +384,14 @@ public:                         // Functions
     __device__ void neighbor3_info_g  ( local_info_t<f_t>& local_info ) const;
 
     __device__ void connect_next_local( local_info_t<f_t>& local_info ) const;
-    __device__ void connect_next_local_test( local_info_t<f_t>& local_info ) const;
 
 
     __device__ void slope_test_local  (local_info_t<f_t>& local_info ) const;
-    __device__ bool slope_detector_local (local_info_t<f_t>& local_info ) const;
     __device__ void slope_detector_g  ( local_info_t<f_t>& local_info ) const;
 
-    // __device__ void area_err          (  ) const;
     __device__ void area_err_local    ( local_info_t<f_t>& local_info ) const;
-    // __device__ void area_err_local_test( local_info_t<f_t>& local_info ) const;
-    __device__ void area_err_c_local  ( local_info_t<f_t>& local_info ) const;
 
     __device__ void sum_area_0_g      ( local_info_t<f_t>& local_info ) const;
-    __device__ void sum_area_0_g_test ( local_info_t<f_t>& local_info ) const;
     __device__ void sum_area_3_local  ( local_info_t<f_t>& local_info ) const;
     
 
