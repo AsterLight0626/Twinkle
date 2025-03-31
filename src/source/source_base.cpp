@@ -65,56 +65,56 @@ __host__ void source_base_t::init( device_t & f_dev )
     return;
 }
 
-__host__ void source_base_t::set_params_2D( device_t & f_dev, f_t ss, f_t qq, f_t rho, f_t xmax, f_t xmin, f_t ymax, f_t ymin, int Nx, int Ny )
-{
-    s = ss;
-    q = qq;
+// __host__ void source_base_t::set_params_2D( device_t & f_dev, f_t ss, f_t qq, f_t rho, f_t xmax, f_t xmin, f_t ymax, f_t ymin, int Nx, int Ny )
+// {
+//     s = ss;
+//     q = qq;
 
-    RelTol    =   1e-4;
-    m1 = 1 / ( q + 1 );
-    m2 = q / ( q + 1 );
-    // int Nx = 30;
-    // int Ny = 30;
+//     RelTol    =   1e-4;
+//     m1 = 1 / ( q + 1 );
+//     m2 = q / ( q + 1 );
+//     // int Nx = 30;
+//     // int Ny = 30;
 
-    for(int y_idx=0;y_idx<Ny;y_idx++)
-    {
-        for(int x_idx=0;x_idx<Nx;x_idx++)
-        {
-            auto & shape  = pool_center.dat_h[ x_idx + y_idx * Nx ];
-            shape.rho = rho;
-            shape.loc_centre.re = ((f_t(x_idx)+0.5) / f_t(Nx)) * (xmax - xmin) + xmin;
-            shape.loc_centre.im = ((f_t(y_idx)+0.5) / f_t(Ny)) * (ymax - ymin) + ymin;            
-        }
-    }
+//     for(int y_idx=0;y_idx<Ny;y_idx++)
+//     {
+//         for(int x_idx=0;x_idx<Nx;x_idx++)
+//         {
+//             auto & shape  = pool_center.dat_h[ x_idx + y_idx * Nx ];
+//             shape.rho = rho;
+//             shape.loc_centre.re = ((f_t(x_idx)+0.5) / f_t(Nx)) * (xmax - xmin) + xmin;
+//             shape.loc_centre.im = ((f_t(y_idx)+0.5) / f_t(Ny)) * (ymax - ymin) + ymin;            
+//         }
+//     }
 
-    pool_center.cp_h2d( f_dev );
-    return;
-}
+//     pool_center.cp_h2d( f_dev );
+//     return;
+// }
 
-__host__ void source_base_t::set_params_1D( device_t & f_dev, f_t ss, f_t qq, f_t rho, f_t xmax, f_t xmin, f_t ymax, f_t ymin, int Nsrc )
-{
-    s = ss;
-    q = qq;
+// __host__ void source_base_t::set_params_1D( device_t & f_dev, f_t ss, f_t qq, f_t rho, f_t xmax, f_t xmin, f_t ymax, f_t ymin, int Nsrc )
+// {
+//     s = ss;
+//     q = qq;
 
-    RelTol    =   1e-4;
-    m1 = 1 / ( q + 1 );
-    m2 = q / ( q + 1 );
-    // int Nx = 30;
-    // int Ny = 30;
+//     RelTol    =   1e-4;
+//     m1 = 1 / ( q + 1 );
+//     m2 = q / ( q + 1 );
+//     // int Nx = 30;
+//     // int Ny = 30;
 
-    for(int idx=0;idx<Nsrc;idx++)
-    {
+//     for(int idx=0;idx<Nsrc;idx++)
+//     {
 
-        auto & shape  = pool_center.dat_h[ idx ];
-        shape.rho = rho;
-        shape.loc_centre.re = ((f_t(idx)) / f_t(Nsrc)) * (xmax - xmin) + xmin;
-        shape.loc_centre.im = ((f_t(idx)) / f_t(Nsrc)) * (ymax - ymin) + ymin;            
+//         auto & shape  = pool_center.dat_h[ idx ];
+//         shape.rho = rho;
+//         shape.loc_centre.re = ((f_t(idx)) / f_t(Nsrc)) * (xmax - xmin) + xmin;
+//         shape.loc_centre.im = ((f_t(idx)) / f_t(Nsrc)) * (ymax - ymin) + ymin;            
 
-    }
+//     }
 
-    pool_center.cp_h2d( f_dev );
-    return;
-}
+//     pool_center.cp_h2d( f_dev );
+//     return;
+// }
 
 __host__ void source_base_t::set_same( device_t & f_dev, f_t ss, f_t qq, f_t rho, f_t zeta_x, f_t zeta_y )
 {
