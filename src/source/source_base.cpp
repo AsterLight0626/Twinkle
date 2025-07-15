@@ -34,6 +34,7 @@ __host__ void source_base_t::init( device_t & f_dev )
     pool_center.setup_mem( f_dev, n_src );
     pool_mag   .setup_mem( f_dev, n_src );
     pool_extended   .setup_mem( f_dev, n_src );
+    pool_lens_s.setup_mem( f_dev, n_src );
 
     stream = f_dev.yield_stream(  );
 
@@ -116,27 +117,27 @@ __host__ void source_base_t::init( device_t & f_dev )
 //     return;
 // }
 
-__host__ void source_base_t::set_same( device_t & f_dev, f_t ss, f_t qq, f_t rho, f_t zeta_x, f_t zeta_y )
-{
-    s = ss;
-    q = qq;
+// __host__ void source_base_t::set_same( device_t & f_dev, f_t ss, f_t qq, f_t rho, f_t zeta_x, f_t zeta_y )
+// {
+//     s = ss;
+//     q = qq;
 
-    RelTol    =   1e-4;
-    m1 = 1 / ( q + 1 );
-    m2 = q / ( q + 1 );
+//     RelTol    =   1e-4;
+//     m1 = 1 / ( q + 1 );
+//     m2 = q / ( q + 1 );
 
-    for(int idx=0;idx<n_src;idx++)
-    {
-        auto & shape  = pool_center.dat_h[ idx ];
-        shape.rho = rho;
-        shape.loc_centre.re = zeta_x;
-        shape.loc_centre.im = zeta_y;            
-    }
+//     for(int idx=0;idx<n_src;idx++)
+//     {
+//         auto & shape  = pool_center.dat_h[ idx ];
+//         shape.rho = rho;
+//         shape.loc_centre.re = zeta_x;
+//         shape.loc_centre.im = zeta_y;            
+//     }
 
 
-    pool_center.cp_h2d( f_dev );
-    return;
-}
+//     pool_center.cp_h2d( f_dev );
+//     return;
+// }
 
 
 __host__ void source_base_t::free( device_t & f_dev )
@@ -163,45 +164,45 @@ auto max_f( const f_t & a, const g_T & b )
 }
 
 __device__ f_t source_base_t::yield_lens_coef
-( c_t * coef, const c_t & zeta ) const
+( c_t * coef, const c_t & zeta, const f_t lens_s ) const
 {
     // const auto m1 = 1 / ( q + 1 );
     // const auto m2 = q / ( q + 1 );
 
     c_t  temp[ 3 ] , zeta_c;
     
-	auto displacement   ( s * m1 );
+	auto displacement   ( lens_s * m1 );
 	auto y  =  zeta - displacement;
 	// auto yc = conj(      y );
 	// zeta_c  = conj(   zeta );
 	auto yc =    y.conj(  ) ;
 	zeta_c  = zeta.conj(  ) ;
 
-	temp[ 0 ] = m2 * s;
+	temp[ 0 ] = m2 * lens_s;
 	temp[ 1 ] = zeta_c + temp[ 0 ];
-	temp[ 2 ] = ( 1 - s * s ) + s * temp[ 1 ];
+	temp[ 2 ] = ( 1 - lens_s * lens_s ) + lens_s * temp[ 1 ];
 
 	coef[ 5 ] = - yc * temp[1];
-	coef[ 4 ] = ( y.norm2(   ) - 1 - 2 * s * yc )
+	coef[ 4 ] = ( y.norm2(   ) - 1 - 2 * lens_s * yc )
               * temp[ 1 ] + temp[ 0 ];
 
     c_t ctmp( 0, 2 * y.im );
-	coef[ 3 ]  = ( 2 * y - s )
+	coef[ 3 ]  = ( 2 * y - lens_s )
         * ( temp [ 2 ] * temp[ 1 ] + ctmp - temp[ 0 ] );
     ctmp.set( 0, 4 * y.im );
     coef[ 3 ] += ( temp[ 0 ] - y ) * ctmp ;
 
-    ctmp.set( 0, 1 - s * y.re );
+    ctmp.set( 0, 1 - lens_s * y.re );
 	coef[ 2 ]  = temp[ 2 ].re
         * ( temp[ 2 ].re * temp[ 1 ].re  + y.im * ctmp )
-        + s * y.im * y.im * ( 2 + s * temp[ 1 ] );
+        + lens_s * y.im * y.im * ( 2 + lens_s * temp[ 1 ] );
     ctmp.set( - y.re, 3 * y.im );
     coef[ 2 ] += temp [ 0 ]
-        * ( 2 * y.norm2(   ) + s * ctmp - 1 );
+        * ( 2 * y.norm2(   ) + lens_s * ctmp - 1 );
 
-    ctmp.set( 0, 2 * s * y.im );
+    ctmp.set( 0, 2 * lens_s * y.im );
 	coef[ 1 ] = temp[ 0 ]
-        * ( ( s + 2 * y ) * temp[ 2 ] + s * ( ctmp - m2 ) );
+        * ( ( lens_s + 2 * y ) * temp[ 2 ] + lens_s * ( ctmp - m2 ) );
     
 	coef[ 0 ] = temp[ 0 ] * temp[ 0 ] * y ;
 
@@ -216,12 +217,12 @@ __device__ bool source_base_t::solve_lens_eq
 }
 
 __device__ bool source_base_t::solve_imgs
-( img_t * img, const c_t & zeta, const bool use_init_roots, c_t * roots_point) const
+( img_t * img, const c_t & zeta, const bool use_init_roots, const f_t lens_s, c_t * roots_point) const
 {
     c_t coeffs[order];
     bool fail;
 
-    const auto & displacement = yield_lens_coef( coeffs , zeta );
+    const auto & displacement = yield_lens_coef( coeffs , zeta, lens_s );
 
     fail = solve_lens_eq( img , coeffs , use_init_roots);
 
@@ -244,9 +245,9 @@ __device__ bool source_base_t::solve_imgs
 
 
 __device__ c_t source_base_t::f_zbar
-( const c_t & z ) const
+( const c_t & z, const f_t lens_s ) const
 {
-    return -(m1 / (z.conj(  ) + s*m2) + m2 / (z.conj(  ) - s*m1));
+    return -(m1 / (z.conj(  ) + lens_s*m2) + m2 / (z.conj(  ) - lens_s*m1));
 }
 
 // <<<<<, 1<2<3<4<5, smaller to bigger
@@ -276,7 +277,7 @@ __device__ void source_base_t::bubble_arg_sort
 }
 
 __device__ void source_base_t::is_physical_all
-( img_t * imgs, const c_t & zeta, int& Nphys ) const
+( img_t * imgs, const c_t & zeta, int& Nphys, const f_t lens_s ) const
 {
     f_t errors[order-1];
     c_t temp;
@@ -292,7 +293,7 @@ __device__ void source_base_t::is_physical_all
 
 	for(int i=0;i<order-1;i++)
 	{
-		temp = f_zbar(imgs[i].position) + imgs[i].position - zeta;	// temp = z + f(zbar) - zeta
+		temp = f_zbar(imgs[i].position, lens_s ) + imgs[i].position - zeta;	// temp = z + f(zbar) - zeta
 		errors[i] = temp.abs(  );
 		rank[i] = i;
 	}
@@ -355,14 +356,14 @@ __device__ void source_base_t::is_physical_all
 
 
 __device__ f_t source_base_t::jacobian
-( const c_t & z ) const
+( const c_t & z, const f_t lens_s ) const
 {
-    c_t d_f = m1/( ( z.conj(  ) + s*m2 ) * ( z.conj(  ) + s*m2 ) ) + m2 / ( (z.conj(  ) - s*m1) * (z.conj(  ) - s*m1) );
+    c_t d_f = m1/( ( z.conj(  ) + lens_s * m2 ) * ( z.conj(  ) + lens_s * m2 ) ) + m2 / ( (z.conj(  ) - lens_s * m1 ) * (z.conj(  ) - lens_s * m1) );
     return 1 - d_f.norm2(   );
 }
 
 __device__ f_t source_base_t::mu_qc
-( const c_t & z ) const
+( const c_t & z, const f_t lens_s ) const
 {
 	c_t items[2];
 	c_t f1,f2,f3;
@@ -373,18 +374,18 @@ __device__ f_t source_base_t::mu_qc
     // f_t& temp3 = items[1].im;
 
 
-	items[0] = m1 / (( z + m2 * s) * ( z + m2 * s));
-	items[1] = m2 / (( z - m1 * s) * ( z - m1 * s));
+	items[0] = m1 / (( z + m2 * lens_s ) * ( z + m2 * lens_s ));
+	items[1] = m2 / (( z - m1 * lens_s ) * ( z - m1 * lens_s ));
 	f1 = items[0] + items[1];
 
 	J = 1 - f1.norm2(  );
 
-	items[0] *= -2 / (z + m2 * s);
-	items[1] *= -2 / (z - m1 * s);
+	items[0] *= -2 / (z + m2 * lens_s );
+	items[1] *= -2 / (z - m1 * lens_s );
 	f2 = items[0] + items[1];
 
-	items[0] *= -3 / (z + m2 * s);
-	items[1] *= -3 / (z - m1 * s);	
+	items[0] *= -3 / (z + m2 * lens_s );
+	items[1] *= -3 / (z - m1 * lens_s );	
 	f3 = items[0] + items[1];
 
 	f1 = f1.conj(  );
@@ -407,25 +408,25 @@ __device__ f_t source_base_t::mu_qc
 }
 
 __device__ f_t source_base_t::ghost_tst
-( const c_t & z_G, const c_t & z_hat ) const
+( const c_t & z_G, const c_t & z_hat, const f_t lens_s ) const
 {
 	c_t fz1,fz2,fz_hat1,J_hat;
 	f_t J;		// J(z_G)
 	c_t items[2];
 
 
-	items[0] = m1 / (( z_G + m2 * s) * ( z_G + m2 * s));
-	items[1] = m2 / (( z_G - m1 * s) * ( z_G - m1 * s));
+	items[0] = m1 / (( z_G + m2 * lens_s ) * ( z_G + m2 * lens_s ));
+	items[1] = m2 / (( z_G - m1 * lens_s ) * ( z_G - m1 * lens_s ));
 	fz1 = items[0] + items[1];
 
 	J = 1 - fz1.norm2(  );
 
-	items[0] = -2 * items[0] / (z_G + m2 * s);
-	items[1] = -2 * items[1] / (z_G - m1 * s);
+	items[0] = -2 * items[0] / (z_G + m2 * lens_s );
+	items[1] = -2 * items[1] / (z_G - m1 * lens_s );
 	fz2 = items[0] + items[1];
 
-	items[0] = m1 / (( z_hat + m2 * s) * ( z_hat + m2 * s));
-	items[1] = m2 / (( z_hat - m1 * s) * ( z_hat - m1 * s));
+	items[0] = m1 / (( z_hat + m2 * lens_s ) * ( z_hat + m2 * lens_s ));
+	items[1] = m2 / (( z_hat - m1 * lens_s ) * ( z_hat - m1 * lens_s ));
 	fz_hat1 = items[0] + items[1];
 
 
@@ -440,7 +441,7 @@ __device__ f_t source_base_t::ghost_tst
 }
 
 __device__ bool source_base_t::ghost_test_all
-( const img_t * const imgs, const int & Nphys, const c_t & zeta, const f_t & Rho) const
+( const img_t * const imgs, const int & Nphys, const c_t & zeta, const f_t & Rho, const f_t lens_s ) const
 {
     bool pass( true );
     if(Nphys==3)
@@ -450,8 +451,8 @@ __device__ bool source_base_t::ghost_test_all
         {
             if(imgs[j].physical==false)
             {
-                const c_t & z_hat = zeta.conj(  ) - f_zbar(imgs[j].position);     // f_zbar: input z, return f(z_conj)
-                GT = max_f(GT, f_t(ghost_tst(imgs[j].position,z_hat)));
+                const c_t & z_hat = zeta.conj(  ) - f_zbar(imgs[j].position, lens_s );     // f_zbar: input z, return f(z_conj)
+                GT = max_f(GT, f_t(ghost_tst(imgs[j].position,z_hat, lens_s )));
             }
         }
         pass = (GT* (Rho+1e-3)*2*C_G < 1);
@@ -460,13 +461,13 @@ __device__ bool source_base_t::ghost_test_all
 }
 
 __device__ bool source_base_t::safe_distance_test
-( const c_t & zeta, const f_t & Rho) const
+( const c_t & zeta, const f_t & Rho, const f_t lens_s ) const
 {
     f_t safedist = 10;
-    if(q<0.01)     // q<0.01
+    if(lens_q<0.01)     // q<0.01
     {
-        const c_t zeta_pc( -1/s + m1*s, 0 );                          // slightly different from VBB2 Eq49, because the frame centre is different. params[1] is z_1
-        const f_t & delta_pc2 = 9*q /s / s;
+        const c_t zeta_pc( -1/lens_s + m1*lens_s, 0 );                          // slightly different from VBB2 Eq49, because the frame centre is different. params[1] is z_1
+        const f_t & delta_pc2 = 9*lens_q /lens_s / lens_s;
         safedist = (zeta-zeta_pc).norm2(  ) - C_P*delta_pc2;
     }
     return (safedist > C_P * Rho*Rho);          
@@ -475,9 +476,9 @@ __device__ bool source_base_t::safe_distance_test
 
 
 __device__ void source_base_t::margin_Q
-( c_t & marginloc, const src_shape_t<f_t>& shape, const float& q ) const
+( c_t & marginloc, const src_shape_t<f_t>& shape, const float& Q ) const
 {
-    f_t theta = q*2*PI;
+    f_t theta = Q*2*PI;
     marginloc.set( shape.loc_centre.re, shape.loc_centre.im );
 
     marginloc.re += cos(theta) * shape.rho;
@@ -508,21 +509,21 @@ __device__ void source_base_t::set_skip_info
 
 
 __device__ void source_base_t::dz_wedge
-( c_t & dz, f_t & wedge, f_t & jacobian, const img_t & img, const c_t & zeta, const c_t & loc_centre, const f_t rho) const
+( c_t & dz, f_t & wedge, f_t & jacobian, const img_t & img, const c_t & zeta, const c_t & loc_centre, const f_t rho, const f_t lens_s) const
 {
 	c_t pzeta_pconjz,ppzeta_ppconjz;
 	c_t items[2];
     c_t zc;
     zc.set(img.position.re, -img.position.im);
 
-	items[0] = m1 / (( zc + m2 * s) * ( zc + m2 * s));
-	items[1] = m2 / (( zc - m1 * s) * ( zc - m1 * s));
+	items[0] = m1 / (( zc + m2 * lens_s ) * ( zc + m2 * lens_s ));
+	items[1] = m2 / (( zc - m1 * lens_s ) * ( zc - m1 * lens_s ));
 	pzeta_pconjz = items[0] + items[1];
 
 	jacobian = 1 - pzeta_pconjz.norm2(  );
 
-	items[0] = -2 * items[0] / (zc + m2 * s);
-	items[1] = -2 * items[1] / (zc - m1 * s);
+	items[0] = -2 * items[0] / (zc + m2 * lens_s );
+	items[1] = -2 * items[1] / (zc - m1 * lens_s );
 	ppzeta_ppconjz = items[0] + items[1];
 
     c_t dzeta;
@@ -664,18 +665,18 @@ __device__ bool source_base_t::check_parity
 }
 
 __device__ bool source_base_t::margin_solve_cal                // return skip
-( img_t * imgs, c_t * dz, f_t * wedge, int & phys_tst, int * temp_j_from_out_j, const c_t & zeta, const c_t & loc_centre, const f_t Rho) const
+( img_t * imgs, c_t * dz, f_t * wedge, int & phys_tst, int * temp_j_from_out_j, const c_t & zeta, const c_t & loc_centre, const f_t Rho, const f_t lens_s) const
 {
-    bool skip = solve_imgs(imgs, zeta, true);
+    bool skip = solve_imgs(imgs, zeta, true, lens_s);
     if(skip){ return true; }
 
     f_t temp_jacobi[ 5 ];
     for(int j=0;j<order-1;j++)
     {   
-        dz_wedge( dz[j], wedge[j], temp_jacobi[j], imgs[j], zeta, loc_centre, Rho);
+        dz_wedge( dz[j], wedge[j], temp_jacobi[j], imgs[j], zeta, loc_centre, Rho, lens_s );
         imgs[j].parity = ( (temp_jacobi[j]>0) ? 0 : 1 );
     }   
-    is_physical_all( imgs, zeta, phys_tst); 
+    is_physical_all( imgs, zeta, phys_tst, lens_s ); 
     skip = check_parity( imgs, temp_jacobi, zeta, phys_tst);
 
     int temp_j_from_order_j[5];       // temp_j = temp_j_from_order_j[order_j]
@@ -1617,24 +1618,26 @@ __device__ void source_base_t::solve_point_approx(  ) const
     img_t temp_images[order-1];
     int phys_tst = -1;
 
-    if(solve_imgs(temp_images, zeta, false, ext_info.roots_point)){return;}      // solve_imgs return "fail"
+    const f_t lens_s = pool_lens_s[ i_src ] ;
 
-    is_physical_all( temp_images , zeta , phys_tst);
+    if(solve_imgs(temp_images, zeta, false, lens_s , ext_info.roots_point)){return;}      // solve_imgs return "fail"
+
+    is_physical_all( temp_images , zeta , phys_tst, lens_s );
 
     f_t muPS = 0, muQC = 0;
     for(int j=0;j<order-1;j++)
     {
         if(temp_images[j].physical)
         {
-            muPS += 1/fabs(jacobian( temp_images[j].position ));
-            muQC += fabs(mu_qc(temp_images[j].position) * (Rho+1e-3) * (Rho+1e-3));
+            muPS += 1/fabs(jacobian( temp_images[j].position, lens_s ));
+            muQC += fabs(mu_qc(temp_images[j].position, lens_s ) * (Rho+1e-3) * (Rho+1e-3));
         }
     }
 
     bool is_point_src
      = (muQC * C_Q < RelTol * muPS)
-    && ghost_test_all( temp_images, phys_tst, zeta, Rho)
-    && safe_distance_test(zeta, Rho);
+    && ghost_test_all( temp_images, phys_tst, zeta, Rho, lens_s )
+    && safe_distance_test(zeta, Rho, lens_s );
 
     if( is_point_src )
     {
@@ -1717,7 +1720,7 @@ __device__ void source_base_t::margin_solve_local( local_info_t<f_t>& local_info
     c_t loc_centre = center.loc_centre;;
     f_t Rho = center.rho;
 
-
+    const f_t lens_s = local_info.lens_s;
 
     for(int j=0;j<order-1;j++)
     {
@@ -1725,7 +1728,7 @@ __device__ void source_base_t::margin_solve_local( local_info_t<f_t>& local_info
     }
 
     //// calculation
-    bool skip = margin_solve_cal (temp_images, dz, wedge, phys_tst, temp_j_from_order_j, zeta, loc_centre, Rho);
+    bool skip = margin_solve_cal (temp_images, dz, wedge, phys_tst, temp_j_from_order_j, zeta, loc_centre, Rho, lens_s );
 
     //// output
     src.skip = skip;

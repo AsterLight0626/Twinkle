@@ -46,6 +46,7 @@ __global__ void solve_extended_sh( const src_T src )      // 不用 const 因为
     local_info.src_ext = src.pool_extended [ i_src ];
     local_info.src_ret = src.pool_mag      [ i_src ];
     local_info.batchidx = 0;
+    local_info.lens_s = src.pool_lens_s [ i_src ];
 
     if( threadIdx.x == 0 )
     {
@@ -221,11 +222,12 @@ public:                      // Data
     pool_t< src_shape_t < f_t > > pool_center;
     pool_t< src_pt_t    < f_t > > pool_margin;
     pool_t< src_ext_t   < f_t > > pool_extended;
+    pool_t<               f_t   > pool_lens_s;
 public:                         // Functions
     __host__ virtual void init( device_t & f_dev );
     // __host__ virtual void set_params_2D( device_t & f_dev, f_t ss, f_t qq, f_t rho, f_t xmax, f_t xmin, f_t ymax, f_t ymin, int Nx, int Ny );
     // __host__ virtual void set_params_1D( device_t & f_dev, f_t ss, f_t qq, f_t rho, f_t xmax, f_t xmin, f_t ymax, f_t ymin, int Nsrc );
-    __host__ virtual void set_same( device_t & f_dev, f_t ss, f_t qq, f_t rho, f_t zeta_x, f_t zeta_y );
+    // __host__ virtual void set_same( device_t & f_dev, f_t ss, f_t qq, f_t rho, f_t zeta_x, f_t zeta_y );
     __host__ virtual void free( device_t & f_dev );    
 
     ////////// Device call parameters //////////
@@ -243,8 +245,8 @@ protected:                      // Data
 // protected:                      // Data
 public:
     static constexpr int order = 6;
-    f_t         s;
-    f_t         q;
+    // f_t         s;
+    f_t         lens_q;
     f_t    RelTol;
     f_t        m1;
     f_t        m2;
@@ -255,40 +257,40 @@ public:
 // protected:                      // Functions
 public:
     __device__ f_t  yield_lens_coef
-    ( c_t   * coef, const c_t & zeta ) const;
+    ( c_t   * coef, const c_t & zeta, const f_t lens_s ) const;
     __device__ bool solve_lens_eq
     ( img_t *  img,       c_t * coef,  const bool use_init_roots = false) const;
 
     __device__ c_t f_zbar
-    ( const c_t & z ) const; 
+    ( const c_t & z, const f_t len_s  ) const; 
     __device__ void bubble_arg_sort
     ( int* index, f_t* arr, const int len ) const;        
     __device__ void is_physical_all
-    ( img_t * imgs, const c_t & zeta, int & Nphys ) const; 
+    ( img_t * imgs, const c_t & zeta, int & Nphys, const f_t lens_s  ) const; 
     __device__ f_t jacobian
-    ( const c_t & z ) const;  
+    ( const c_t & z, const f_t lens_s ) const;  
     __device__ f_t mu_qc
-    ( const c_t & z ) const;
+    ( const c_t & z, const f_t lens_s ) const;
     __device__ f_t ghost_tst
-    ( const c_t & z_G, const c_t & z_hat ) const;   
+    ( const c_t & z_G, const c_t & z_hat, const f_t lens_s ) const;   
 
     __device__ bool solve_imgs
-    ( img_t * imgs, const c_t & zeta, const bool use_init_roots, c_t * roots_point = nullptr) const;
+    ( img_t * imgs, const c_t & zeta, const bool use_init_roots, const f_t lens_s,  c_t * roots_point = nullptr) const;
     __device__ f_t point_mag
     ( img_t * imgs, const c_t & zeta, int & Nphys ) const;
     __device__ bool ghost_test_all
-    ( const img_t * const imgs, const int & Nphys, const c_t & zeta, const f_t & Rho) const;
+    ( const img_t * const imgs, const int & Nphys, const c_t & zeta, const f_t & Rho, const f_t lens_s ) const;
     __device__ bool safe_distance_test
-    ( const c_t & zeta, const f_t & Rho ) const;
+    ( const c_t & zeta, const f_t & Rho, const f_t lens_s ) const;
 
 
     __device__ void margin_Q
-    ( c_t & marginloc, const src_shape_t<f_t>& shape, const float& q ) const;
+    ( c_t & marginloc, const src_shape_t<f_t>& shape, const float& Q ) const;
 
     __device__ void set_skip_info
     ( src_pt_t < f_t > & src ) const;
     __device__ void dz_wedge
-    ( c_t & dz, f_t & wedge, f_t & jacobian, const img_t & img, const c_t & zeta, const c_t & loc_centre, const f_t rho) const;
+    ( c_t & dz, f_t & wedge, f_t & jacobian, const img_t & img, const c_t & zeta, const c_t & loc_centre, const f_t rho, const f_t lens_s ) const;
 
     __device__ bool polish_pp
     ( img_t * imgs, const f_t * const jacobians) const;
@@ -298,7 +300,7 @@ public:
     ( img_t * imgs, const f_t * const jacobians, const c_t & zeta, const int Nphys) const;
 
     __device__ bool margin_solve_cal                // return skip
-    ( img_t * imgs, c_t * dz, f_t * wedge, int & phys_tst, int * temp_j_from_out_j, const c_t & zeta, const c_t & loc_centre, const f_t Rho) const;
+    ( img_t * imgs, c_t * dz, f_t * wedge, int & phys_tst, int * temp_j_from_out_j, const c_t & zeta, const c_t & loc_centre, const f_t Rho, const f_t len_s) const;
 
     
 

@@ -1,3 +1,5 @@
+# python setup.py build_ext --inplace
+
 from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext
 import os
@@ -58,6 +60,7 @@ class CustomBuildExt(build_ext):
             '--expt-relaxed-constexpr',
             '-Xcompiler', '-fPIC',          # 主机代码PIC
             '-Xcompiler', '-D_GLIBCXX_USE_CXX11_ABI=0',
+            '-Xcompiler', '-DNPY_NO_DEPRECATED_API=NPY_2_0_API_VERSION',  # 新增这行
             '-Xcompiler', '-Wno-deprecated-declarations'  # 抑制警告
         ]
 
@@ -106,6 +109,7 @@ cuda_extension = CUDAExtension(
     library_dirs=['/usr/local/cuda-12.3/lib64'],
     language='c++'
 )
+# print("NumPy include path:", np.get_include())
 
 setup(
     name='twinkle',

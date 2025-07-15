@@ -1,3 +1,4 @@
+#define NPY_NO_DEPRECATED_API NPY_2_0_API_VERSION
 #include <Python.h>
 #include <memory>
 #include "../src/driver/driver.h"
@@ -105,41 +106,103 @@ static int PyTwinkle_init(PyTwinkle* self, PyObject* args, PyObject* kwargs) {
 //     }
 // }
 
+// static PyObject* PyTwinkle_set_params(PyTwinkle *self, PyObject *args) {
+//     double ss, qq, rho, RELTOL;
+//     PyObject *py_xs, *py_ys;
+
+//     // 解析参数：ss, qq, rho, RELTOL, xs(array), ys(array)
+//     if (!PyArg_ParseTuple(args, "ddddOO", 
+//                          &ss, &qq, &rho, &RELTOL,
+//                          &py_xs, &py_ys)) {
+//         PyErr_SetString(PyExc_TypeError, 
+//             "Arguments: (ss, qq, rho, RELTOL: float, xs: np.ndarray, ys: np.ndarray)");
+//         return NULL;
+//     }
+
+//     PyArrayObject *arr_xs = NULL;
+//     PyArrayObject *arr_ys = NULL;
+
+//     // 转换并检查 xs 数组：1维，双精度，C连续
+//     arr_xs = (PyArrayObject*) PyArray_FromAny(py_xs, 
+//         PyArray_DescrFromType(NPY_DOUBLE), 1, 1,
+//         NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED, NULL);
+//     if (!arr_xs) {
+//         PyErr_SetString(PyExc_TypeError, "xs must be a 1D contiguous float64 array");
+//         Py_XDECREF(arr_xs);
+//         Py_XDECREF(arr_ys);
+//         return NULL;
+//     }
+
+//     // 转换并检查 ys 数组
+//     arr_ys = (PyArrayObject*) PyArray_FromAny(py_ys, 
+//         PyArray_DescrFromType(NPY_DOUBLE), 1, 1,
+//         NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED, NULL);
+//     if (!arr_ys) {
+//         PyErr_SetString(PyExc_TypeError, "ys must be a 1D contiguous float64 array");
+//         Py_XDECREF(arr_xs);
+//         Py_XDECREF(arr_ys);
+//         return NULL;
+//     }
+
+//     // 检查数组长度是否一致
+//     npy_intp len_x = PyArray_SIZE(arr_xs);
+//     npy_intp len_y = PyArray_SIZE(arr_ys);
+//     if (len_x != len_y) {
+//         PyErr_SetString(PyExc_ValueError, "xs and ys must have the same length");
+//         Py_XDECREF(arr_xs);
+//         Py_XDECREF(arr_ys);
+//         return NULL;
+//     }
+
+//     // 获取数据指针
+//     double *xs_data = (double*) PyArray_DATA(arr_xs);
+//     double *ys_data = (double*) PyArray_DATA(arr_ys);
+
+//     try {
+//         // 调用 C++ 函数，传递原始指针
+//         self->obj->set_params(ss, qq, rho, RELTOL, xs_data, ys_data);
+//         Py_DECREF(arr_xs);
+//         Py_DECREF(arr_ys);
+//         Py_RETURN_NONE;
+//     } catch (const std::exception& e) {
+//         PyErr_SetString(PyExc_RuntimeError, e.what());
+//         Py_XDECREF(arr_xs);
+//         Py_XDECREF(arr_ys);
+//         return NULL;
+//     }
+
+// }
+
 static PyObject* PyTwinkle_set_params(PyTwinkle *self, PyObject *args) {
-    double ss, qq, rho, RELTOL;
+    PyObject *py_ss;  // 通用对象，可以是浮点数或数组
+    double qq, rho, RELTOL;
     PyObject *py_xs, *py_ys;
 
-    // 解析参数：ss, qq, rho, RELTOL, xs(array), ys(array)
-    if (!PyArg_ParseTuple(args, "ddddOO", 
-                         &ss, &qq, &rho, &RELTOL,
+    // 解析参数：ss(标量或数组), qq, rho, RELTOL, xs(array), ys(array)
+    if (!PyArg_ParseTuple(args, "OdddOO", 
+                         &py_ss, &qq, &rho, &RELTOL,
                          &py_xs, &py_ys)) {
         PyErr_SetString(PyExc_TypeError, 
-            "Arguments: (ss, qq, rho, RELTOL: float, xs: np.ndarray, ys: np.ndarray)");
+            "Arguments: (ss: float OR np.ndarray, qq, rho, RELTOL: float, "
+            "xs: np.ndarray, ys: np.ndarray)");
         return NULL;
     }
 
-    PyArrayObject *arr_xs = NULL;
-    PyArrayObject *arr_ys = NULL;
-
-    // 转换并检查 xs 数组：1维，双精度，C连续
-    arr_xs = (PyArrayObject*) PyArray_FromAny(py_xs, 
+    // 转换并检查 xs 数组
+    PyArrayObject *arr_xs = (PyArrayObject*)PyArray_FromAny(py_xs, 
         PyArray_DescrFromType(NPY_DOUBLE), 1, 1,
         NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED, NULL);
     if (!arr_xs) {
         PyErr_SetString(PyExc_TypeError, "xs must be a 1D contiguous float64 array");
-        Py_XDECREF(arr_xs);
-        Py_XDECREF(arr_ys);
         return NULL;
     }
 
     // 转换并检查 ys 数组
-    arr_ys = (PyArrayObject*) PyArray_FromAny(py_ys, 
+    PyArrayObject *arr_ys = (PyArrayObject*)PyArray_FromAny(py_ys, 
         PyArray_DescrFromType(NPY_DOUBLE), 1, 1,
         NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED, NULL);
     if (!arr_ys) {
         PyErr_SetString(PyExc_TypeError, "ys must be a 1D contiguous float64 array");
-        Py_XDECREF(arr_xs);
-        Py_XDECREF(arr_ys);
         return NULL;
     }
 
@@ -148,33 +211,49 @@ static PyObject* PyTwinkle_set_params(PyTwinkle *self, PyObject *args) {
     npy_intp len_y = PyArray_SIZE(arr_ys);
     if (len_x != len_y) {
         PyErr_SetString(PyExc_ValueError, "xs and ys must have the same length");
-        Py_XDECREF(arr_xs);
-        Py_XDECREF(arr_ys);
         return NULL;
     }
 
     // 获取数据指针
-    double *xs_data = (double*) PyArray_DATA(arr_xs);
-    double *ys_data = (double*) PyArray_DATA(arr_ys);
-
+    double *xs_data = (double*)PyArray_DATA(arr_xs);
+    double *ys_data = (double*)PyArray_DATA(arr_ys);
+    
     try {
-        // 调用 C++ 函数，传递原始指针
-        self->obj->set_params(ss, qq, rho, RELTOL, xs_data, ys_data);
-        Py_DECREF(arr_xs);
-        Py_DECREF(arr_ys);
+        // 情况1: ss 是浮点数（标量）
+        if (PyFloat_Check(py_ss)) {
+            double ss_value = PyFloat_AsDouble(py_ss);
+            self->obj->set_params(ss_value, qq, rho, RELTOL, xs_data, ys_data);
+        }
+        // 情况2: ss 是数组
+        else {
+            PyArrayObject *arr_ss = (PyArrayObject*)PyArray_FromAny(py_ss, 
+                PyArray_DescrFromType(NPY_DOUBLE), 1, 1,
+                NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED, NULL);
+            
+            if (!arr_ss) {
+                PyErr_SetString(PyExc_TypeError, 
+                    "ss must be float or 1D contiguous float64 array");
+                return NULL;
+            }
+            
+            // 检查 ss 数组长度
+            npy_intp len_s = PyArray_SIZE(arr_ss);
+            if (len_s != len_x) {
+                PyErr_SetString(PyExc_ValueError, 
+                    "ss array length must match xs/ys length");
+                return NULL;
+            }
+            
+            double *ss_data = (double*)PyArray_DATA(arr_ss);
+            self->obj->set_params(ss_data, qq, rho, RELTOL, xs_data, ys_data);
+        }
+        
         Py_RETURN_NONE;
+        
     } catch (const std::exception& e) {
         PyErr_SetString(PyExc_RuntimeError, e.what());
-        Py_XDECREF(arr_xs);
-        Py_XDECREF(arr_ys);
         return NULL;
     }
-
-// error:
-//     // 错误处理：释放数组引用
-//         Py_XDECREF(arr_xs);
-//         Py_XDECREF(arr_ys);
-//         return NULL;
 }
 
 // return_mag_to()方法包装（需配合NumPy使用）
@@ -215,12 +294,32 @@ static PyObject* PyTwinkle_run(PyTwinkle *self, PyObject *Py_UNUSED(ignored)) {
         return NULL;
     }
 }
+
+static PyObject* get_numpy_build_version(PyObject* self, PyObject* args) {
+    // 优先使用 NumPy 提供的字符串宏
+    #if defined(NPY_VERSION_STRING)
+        return PyUnicode_FromString(NPY_VERSION_STRING);
+    #else
+        // 手动转换版本号
+        const int major = NPY_VERSION >> 24;
+        const int minor = (NPY_VERSION >> 16) & 0xFF;
+        const int patch = NPY_VERSION & 0xFFFF;
+        
+        char version_str[32];
+        snprintf(version_str, sizeof(version_str), "%d.%d.%d", 
+                 major, minor, patch);
+        
+        return PyUnicode_FromString(version_str);
+    #endif
+}
+
 // 方法表修正（参数类型匹配）
 static PyMethodDef PyTwinkle_methods[] = {
     {"init", (PyCFunction)PyTwinkle_init, METH_VARARGS, "Initialize driver"},
     {"set_params", (PyCFunction)PyTwinkle_set_params, METH_VARARGS, "Set parameters"},
     {"return_mag_to", (PyCFunction)PyTwinkle_return_mag_to, METH_VARARGS, "Write results to numpy array"},
     {"run", (PyCFunction)PyTwinkle_run, METH_NOARGS, "Execute computation"},
+    {"get_numpy_build_version", get_numpy_build_version, METH_NOARGS, "Build-time numpy version"},
     {NULL, NULL, 0, NULL}  // Sentinel
 };
 

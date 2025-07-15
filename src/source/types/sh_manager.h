@@ -9,6 +9,7 @@ namespace twinkle
 template < class f_T, int n_th = 32 >
 struct local_info_t
 {
+    f_T                        lens_s;
     // char* dat_sh;
     int                      batchidx;
     src_shape_t< f_T >      src_shape;

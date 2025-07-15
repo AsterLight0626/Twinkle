@@ -20,6 +20,7 @@ public:
     // virtual void set_params_2D( double ss, double qq, double rho, double xmax, double xmin, double ymax, double ymin, int Nx, int Ny );
     // virtual void set_params_1D( double ss, double qq, double rho, double xmax, double xmin, double ymax, double ymin, int Nsrc );
     virtual void set_params( double ss, double qq, double rho, double RELTOL, double* xs, double* ys );
+    virtual void set_params( const double* ss, double qq, double rho, double RELTOL, double* xs, double* ys );
     virtual void return_mag_to( double* mag );
     virtual void free(  );    
 
