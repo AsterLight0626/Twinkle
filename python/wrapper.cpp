@@ -36,20 +36,32 @@ static int PyTwinkle_init(PyTwinkle* self, PyObject* args, PyObject* kwargs) {
     int n_srcs = -1;
     int device_num = 0;
     int n_stream = 1;
+    double RelTol = 1e-4;
 
     // 定义参数选项
-    static char* kwlist[] = {"n_srcs", "device_num", "n_stream", NULL};
+    static char* kwlist1[] = {(char*)"n_srcs", (char*)"device_num", (char*)"n_stream", (char*)"RelTol", NULL};
+    static char* kwlist2[] = {(char*)"n_srcs", (char*)"device_num", (char*)"n_stream", NULL};
     
     // 解析参数字典
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "iii", kwlist,
-                                    &n_srcs, &device_num, &n_stream)) {
-        return -1;
+    if (PyArg_ParseTupleAndKeywords(args, kwargs, "iiid", kwlist1, &n_srcs, &device_num, &n_stream, &RelTol))
+    {    }
+    else
+    {
+        PyErr_Clear();
+        if (PyArg_ParseTupleAndKeywords(args, kwargs, "iii", kwlist2, &n_srcs, &device_num, &n_stream))
+        {  
+            printf("In new version, RelTol is set in init(), default 1e-4. The RelTol in set_params() won't be used\n");
+        }
+        else
+        {
+            return -1;
+        }
     }
 
 
     try {
         self->obj = new twinkle::driver_t();
-        self->obj->init(n_srcs, device_num, n_stream);
+        self->obj->init(n_srcs, device_num, n_stream, RelTol);
     } 
     catch (const std::bad_alloc& e) {
         PyErr_SetString(PyExc_MemoryError, "Memory allocation failed");
@@ -175,17 +187,26 @@ static int PyTwinkle_init(PyTwinkle* self, PyObject* args, PyObject* kwargs) {
 
 static PyObject* PyTwinkle_set_params(PyTwinkle *self, PyObject *args) {
     PyObject *py_ss;  // 通用对象，可以是浮点数或数组
-    double qq, rho, RELTOL;
+    double qq, rho, RelTol;
     PyObject *py_xs, *py_ys;
 
     // 解析参数：ss(标量或数组), qq, rho, RELTOL, xs(array), ys(array)
-    if (!PyArg_ParseTuple(args, "OdddOO", 
-                         &py_ss, &qq, &rho, &RELTOL,
-                         &py_xs, &py_ys)) {
-        PyErr_SetString(PyExc_TypeError, 
-            "Arguments: (ss: float OR np.ndarray, qq, rho, RELTOL: float, "
-            "xs: np.ndarray, ys: np.ndarray)");
-        return NULL;
+    if (PyArg_ParseTuple(args, "OdddOO", &py_ss, &qq, &rho, &RelTol, &py_xs, &py_ys)) {
+        // 第一种情况：提供了RelTol
+        // printf("In new version, RelTol is set in Twinkle.init(), default 1e-4. The RelTol here won't be used\n");
+    }
+    else {
+        PyErr_Clear();
+        // 尝试第二种参数组合（不包含RelTol）
+        if (!PyArg_ParseTuple(args, "OddOO", &py_ss, &qq, &rho, &py_xs, &py_ys)) {
+            PyErr_SetString(PyExc_TypeError, 
+                "Arguments: (ss: float OR np.ndarray, qq, rho: float, "
+                "xs: np.ndarray, ys: np.ndarray) OR "
+                "(ss: float OR np.ndarray, qq, rho: float, RelTol: float, "
+                "xs: np.ndarray, ys: np.ndarray)");
+            return NULL;
+        }
+        // 第二种情况：不提供RelTol
     }
 
     // 转换并检查 xs 数组
@@ -222,7 +243,7 @@ static PyObject* PyTwinkle_set_params(PyTwinkle *self, PyObject *args) {
         // 情况1: ss 是浮点数（标量）
         if (PyFloat_Check(py_ss)) {
             double ss_value = PyFloat_AsDouble(py_ss);
-            self->obj->set_params(ss_value, qq, rho, RELTOL, xs_data, ys_data);
+            self->obj->set_params(ss_value, qq, rho, xs_data, ys_data);
         }
         // 情况2: ss 是数组
         else {
@@ -245,7 +266,7 @@ static PyObject* PyTwinkle_set_params(PyTwinkle *self, PyObject *args) {
             }
             
             double *ss_data = (double*)PyArray_DATA(arr_ss);
-            self->obj->set_params(ss_data, qq, rho, RELTOL, xs_data, ys_data);
+            self->obj->set_params(ss_data, qq, rho, xs_data, ys_data);
         }
         
         Py_RETURN_NONE;

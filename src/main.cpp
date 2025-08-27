@@ -29,8 +29,9 @@ int main()
     twinkle::driver_t driver;
 
     int device_num = 2;
-    driver.init( Nsrcs, device_num, n_stream );
-    driver.set_params(ss,qq,rho,RelTol,xs,ys);
+    driver.init( Nsrcs, device_num, n_stream, RelTol );
+    // driver.set_params(ss,qq,rho,RelTol,xs,ys);
+    driver.set_params(ss,qq,rho,xs,ys);
 
     driver.run (  );
     // driver.p_dev->sync_all_streams(  );        

@@ -117,14 +117,19 @@ __host__ void source_base_t::init( device_t & f_dev )
 //     return;
 // }
 
+
 // __host__ void source_base_t::set_same( device_t & f_dev, f_t ss, f_t qq, f_t rho, f_t zeta_x, f_t zeta_y )
 // {
-//     s = ss;
-//     q = qq;
+//     for(int idx=0;idx<n_src;idx++)
+//     {
+//         pool_lens_s.dat_h[idx] = ss;
+//     }    
+//     // lens_s = ss;
+//     lens_q = qq;
 
 //     RelTol    =   1e-4;
-//     m1 = 1 / ( q + 1 );
-//     m2 = q / ( q + 1 );
+//     m1 = 1 / ( lens_q + 1 );
+//     m2 = lens_q / ( lens_q + 1 );
 
 //     for(int idx=0;idx<n_src;idx++)
 //     {
@@ -136,8 +141,10 @@ __host__ void source_base_t::init( device_t & f_dev )
 
 
 //     pool_center.cp_h2d( f_dev );
+//     pool_lens_s.cp_h2d( f_dev );
 //     return;
 // }
+
 
 
 __host__ void source_base_t::free( device_t & f_dev )
@@ -2315,13 +2322,13 @@ __device__ void source_base_t::slope_detector_g    ( local_info_t<f_t>& local_in
                     if(j0[iii]!=2 && j0[iii]!=3)
                     {
                         local_info.shared_info->Break = true;
-                        printf("j0 not 2 or 3!\n");
+                        // printf("j0 not 2 or 3!\n");
                         return;
                     }
                     if(j1[iii]!=2 && j1[iii]!=3)
                     {
                         local_info.shared_info->Break = true;
-                        printf("j1 not 2 or 3!\n");
+                        // printf("j1 not 2 or 3!\n");
                         return;
                     }
 
@@ -2411,7 +2418,7 @@ __device__ void source_base_t::slope_detector_g    ( local_info_t<f_t>& local_in
                 else{
                     if(cos2<0.9)
                     {
-                        printf("unclear! srcidx: %d\n",blockIdx.x);
+                        // printf("unclear! srcidx: %d\n",blockIdx.x);
                         unclear = true;
                         // unclear_start = 0;
                     }
@@ -2512,7 +2519,7 @@ __device__ void source_base_t::slope_detector_g    ( local_info_t<f_t>& local_in
                         else{
                             if(cos2<0.9)
                             {
-                                printf("unclear! srcidx: %d\n",blockIdx.x);
+                                // printf("unclear! srcidx: %d\n",blockIdx.x);
                                 unclear=true;
                             }
                         }
