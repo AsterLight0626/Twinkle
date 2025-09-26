@@ -9,7 +9,7 @@
 
 int main()
 {
-    static const int Nsrcs = 1000;
+    static const int Nsrcs = 1024;
 
     double xs[Nsrcs];
     double ys[Nsrcs];
@@ -24,7 +24,7 @@ int main()
     double RelTol = 1e-4;
 
 
-    int n_stream = 10;
+    int n_stream = 2;
     // twinkle::driver_t driver( n_stream );
     twinkle::driver_t driver;
 
@@ -33,15 +33,26 @@ int main()
     // driver.set_params(ss,qq,rho,RelTol,xs,ys);
     driver.set_params(ss,qq,rho,xs,ys);
 
-    driver.run (  );
+    driver.runLD ( 1.0 );
     // driver.p_dev->sync_all_streams(  );        
 
     double magnification[Nsrcs];
     driver.return_mag_to(magnification);
 
-    printf("mag[2]: %.16f\n",magnification[2]);
-    printf("mag[12]: %.16f\n",magnification[12]);
+    // printf("mag[2]: %.16f\n",magnification[2]);
+    // printf("mag[12]: %.16f\n",magnification[12]);
 
+    std::ofstream outfile("magnitude_data.txt");
+    if (outfile.is_open()) {
+        outfile.precision(16); // 设置16位小数精度
+        outfile << std::fixed; // 固定小数点格式
+        for(int i_src=0;i_src<Nsrcs;i_src++)
+        {
+            outfile << magnification[i_src] << std::endl;
+        }
+        
+        outfile.close();
+    }
 
     driver.free();
 

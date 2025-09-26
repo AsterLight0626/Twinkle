@@ -241,5 +241,13 @@ void driver_t::run(  )
     return;
 }
 
+void driver_t::runLD( double LD_a )
+{
+    for( auto & p_sol : vp_sol )    
+        p_sol-> runLD_A ( *  p_dev, LD_a );
+    p_dev->sync_all_streams(   );
+    return;
+}
+
 };
  

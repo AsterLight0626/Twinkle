@@ -3138,6 +3138,158 @@ __device__ void source_base_t::adap_set_g ( local_info_t<f_t>& local_info ) cons
     }
 }
 
+//////////////////////////////////////////////////////////////////////
+
+__device__ void source_base_t::solve_extended_uniform( local_info_t<f_t>& local_info, const int i_src ) const
+{
+
+    if( threadIdx.x == 0 )
+    {
+        local_info.shared_info->Break = local_info.src_ext.Break;
+    }
+    __syncthreads();
+
+    // calculation
+    for(int bcidx=0;bcidx < (n_point_max / n_th) ;bcidx++)
+    // for(int bcidx=0;bcidx < 6 ;bcidx++)
+    {
+        if((local_info.src_ext.SolveSucceed)||(local_info.shared_info->Break)){break;}
+
+        if(local_info.batchidx==0){margin_set_local( local_info );}
+        else{adap_set_g( local_info );}
+        __syncthreads();
+        margin_solve_local( local_info );
+        __syncthreads();
+        neighbor3_info_g( local_info );         // g 只体现在读入相邻旧点的 src_pt 上, 可以依据 skip 情况直接修改局域的 prev/next_src_idx
+        __syncthreads(); 
+        connect_next_local( local_info );
+        __syncthreads();
+
+        if( threadIdx.x == 0 )
+        {
+            local_info.shared_info->Ncross = 0;
+            local_info.shared_info->deltaS_cross_global = 0;
+            local_info.shared_info->Err_cross_global = 0;
+        }
+        __syncthreads();
+        slope_test_local( local_info );
+        __syncthreads();        
+
+        if(local_info.shared_info->Ncross > 0  && (!local_info.shared_info->Break))
+        {
+            {
+                // shared neighbor02 to global
+                if( local_info.neighbor3[0] < local_info.batchidx * n_th )
+                {
+                    for(int j=3;j<5;j++)
+                    {
+                        pool_margin[i_src * n_point_max + local_info.neighbor3[0]].next_idx[j] = local_info.pt_prev.next_idx[j];
+                        pool_margin[i_src * n_point_max + local_info.neighbor3[0]].next_j[j] = local_info.pt_prev.next_j[j];
+                    }
+                    pool_margin[i_src * n_point_max + local_info.neighbor3[0]].next_src_idx = local_info.pt_prev.next_src_idx;
+                }
+                pool_margin[i_src * n_point_max + local_info.neighbor3[1]] = local_info.new_pts[ threadIdx.x ];
+                if( local_info.neighbor3[2] < local_info.batchidx * n_th )
+                {
+                    for(int j=0;j<3;j++)
+                    {
+                        pool_margin[i_src * n_point_max + local_info.neighbor3[2]].next_idx[j] = local_info.pt_next.next_idx[j];
+                        pool_margin[i_src * n_point_max + local_info.neighbor3[2]].next_j[j] = local_info.pt_next.next_j[j];
+                    }
+                    pool_margin[i_src * n_point_max + local_info.neighbor3[2]].prev_src_idx = local_info.pt_next.prev_src_idx;
+                }
+                __syncthreads();
+
+                slope_detector_g( local_info );
+                __syncthreads(); 
+
+                local_info.pt_prev = pool_margin[ blockIdx.x * n_point_max + local_info.neighbor3[0] ];
+                local_info.pt_next = pool_margin[ blockIdx.x * n_point_max + local_info.neighbor3[2] ];
+                local_info.new_pts[ threadIdx.x ] = pool_margin[ blockIdx.x * n_point_max + local_info.neighbor3[1] ];
+                __syncthreads();
+            }
+        }
+
+        area_err_local( local_info );
+        __syncthreads();
+
+        if(local_info.batchidx>=4)
+        {
+            sum_area_3_local( local_info );
+            __syncthreads();             
+        }
+       
+        // shared neighbor02 to global
+        if(! local_info.new_pts[ threadIdx.x ].skip)
+        {
+            if( local_info.neighbor3[0] < local_info.batchidx * n_th )
+            {
+                // {pool_margin[i_src * n_point_max + local_info.neighbor3[0]] = local_info.pt_prev;}
+                for(int j=3;j<5;j++)
+                {
+                    pool_margin[i_src * n_point_max + local_info.neighbor3[0]].deltaS[j] = local_info.pt_prev.deltaS[j];
+                    pool_margin[i_src * n_point_max + local_info.neighbor3[0]].deltaS_Err[j] = local_info.pt_prev.deltaS_Err[j];
+                    pool_margin[i_src * n_point_max + local_info.neighbor3[0]].next_idx[j] = local_info.pt_prev.next_idx[j];
+                    pool_margin[i_src * n_point_max + local_info.neighbor3[0]].next_j[j] = local_info.pt_prev.next_j[j];
+                }
+                pool_margin[i_src * n_point_max + local_info.neighbor3[0]].area_interval = local_info.pt_prev.area_interval;
+                pool_margin[i_src * n_point_max + local_info.neighbor3[0]].error_interval = local_info.pt_prev.error_interval;
+                // pool_margin[i_src * n_point_max + local_info.neighbor3[0]].next_src_idx = local_info.pt_prev.next_src_idx;       // adap 里面已经把 global 的信息改好了
+            }
+            pool_margin[i_src * n_point_max + local_info.neighbor3[1]] = local_info.new_pts[ threadIdx.x ];
+            if( local_info.neighbor3[2] < local_info.batchidx * n_th )
+            {
+                // {pool_margin[i_src * n_point_max + local_info.neighbor3[2]] = local_info.pt_next;}
+                for(int j=0;j<3;j++)
+                {
+                    pool_margin[i_src * n_point_max + local_info.neighbor3[2]].deltaS[j] = local_info.pt_next.deltaS[j];
+                    pool_margin[i_src * n_point_max + local_info.neighbor3[2]].deltaS_Err[j] = local_info.pt_next.deltaS_Err[j];
+                    pool_margin[i_src * n_point_max + local_info.neighbor3[2]].next_idx[j] = local_info.pt_next.next_idx[j];
+                    pool_margin[i_src * n_point_max + local_info.neighbor3[2]].next_j[j] = local_info.pt_next.next_j[j];
+                }
+                // pool_margin[i_src * n_point_max + local_info.neighbor3[2]].prev_src_idx = local_info.pt_next.prev_src_idx;
+            }
+        }
+        else
+        {
+            pool_margin[i_src * n_point_max + local_info.neighbor3[1]] = local_info.new_pts[ threadIdx.x ];
+        }
+        __syncthreads();
+        // shared neighbor02 to global
+
+        if(bcidx<4)
+        {
+            sum_area_0_g( local_info );
+            __syncthreads();
+        }
+        
+        local_info.batchidx += 1;
+    }
+
+    __syncthreads();
+    // if(threadIdx.x == 0)                // 最后才输出
+    // {
+    //     // local_info.src_ext.SolveSucceed = local_info.shared_info->SolveSucceed;
+    //     local_info.src_ext.Break = local_info.shared_info->Break;
+    //     pool_extended[ i_src ] = local_info.src_ext;
+    //     pool_mag[ i_src ] = local_info.src_ret;
+    // }
+
+}
+
+__device__ f_t source_base_t::M0_phi( local_info_t<f_t>& local_info, const int i_src, const f_t phi ) const
+{
+    f_t r2 = 1-phi*phi;
+    local_info.batchidx = 0;
+    local_info.src_ext.SolveSucceed = false;
+    local_info.src_ext.Break = false;
+    local_info.src_shape.src_area = pool_center[ i_src ].src_area * r2;
+    local_info.src_shape.rho = pool_center [ i_src ].rho * sqrt(r2);
+    solve_extended_uniform(local_info, i_src);
+
+    return local_info.src_ret.mag;
+}
+
 ////////////////////////////////////////////////////////////
 //
 
@@ -3145,7 +3297,6 @@ __host__ void source_base_t::run( device_t & f_dev )
 {
     auto n_bl = ( n_src + n_th - 1 ) / n_th;
     auto s_sh = 0;
-
 
     auto lpar = std::make_tuple
         ( dim3( n_bl ), dim3( n_th ), s_sh );
@@ -3160,10 +3311,315 @@ __host__ void source_base_t::run( device_t & f_dev )
             + sizeof(cross_info_t) * n_cross_max * 4
             + sizeof(src_pt_t< float2_t >) * n_th);
     // printf("shared memory size: %d\n",s_sh);
+
     lpar = std::make_tuple
         ( dim3( n_bl ), dim3( n_th ), s_sh );
     f_dev.launch( solve_extended_sh, lpar, stream, ( * this ) );
 
+
+    return;
+}
+
+// it has synchronization problems, don't use it
+// __host__ void source_base_t::runLD( device_t & f_dev, double LD_a, int depth )
+// {
+//     auto n_bl = ( n_src + n_th - 1 ) / n_th;
+//     auto s_sh = 0;
+//     auto lpar = std::make_tuple
+//         ( dim3( n_bl ), dim3( n_th ), s_sh );
+//     f_dev.launch( point_approximation, lpar, stream, ( * this ) );
+//     n_bl = n_src;
+//     s_sh = sizeof(int)*n_th + 
+//     std::max( sizeof(float2_t)*n_point_max, 
+//               sizeof(float2_t)   * 8*n_th
+//             + sizeof(shared_info_t< float2_t >) * 1 
+//             + sizeof(cross_info_t) * n_cross_max * 4
+//             + sizeof(src_pt_t< float2_t >) * n_th);
+
+//     int M0len = 1<<depth + 1;       // +1 是为了存 r=0 的积分值（0）
+//     float2_t* M0r2_a = new float2_t[(M0len) * n_src];
+//     for(int i_src=0;i_src<n_src;i_src++)
+//     {
+//         for(int i_M0=0;i_M0<M0len;i_M0++)
+//         {
+//             M0r2_a[i_src*i_M0 + i_M0] = 0;
+//         }
+//     }
+
+//     float2_t* phi_a = new float2_t[n_src];
+//     for(int i_src=0;i_src<n_src;i_src++)
+//     {
+//         phi_a[i_src] = 0;
+//     }
+
+//     float2_t phi;
+//     for(int i_phi=0;i_phi<(1<<depth);i_phi++)
+//     {
+//         // phi = int_base_inverse(i_phi);
+//         phi = float2_t(i_phi) / float2_t(int(1<<depth));        // phi 从0到1，r从1到0
+//         for(int i_src=0;i_src<n_src;i_src++)
+//         {
+//             phi_a[i_src] = phi;
+//         }
+//         lpar = std::make_tuple
+//             ( dim3( n_bl ), dim3( n_th ), s_sh );
+//         f_dev.launch( solve_LD_sh, lpar, stream, ( * this ), phi_a );
+//         f_dev.sync_all_streams();
+//         pool_mag.cp_d2h( f_dev );
+//         f_dev.sync_all_streams();
+//         for(int i_src=0;i_src<n_src;i_src++)
+//         {   
+//             M0r2_a[i_src*M0len + i_phi] = pool_mag.dat_h[ i_src ].mag * (1-phi_a[i_src]*phi_a[i_src]);
+//         }
+//         f_dev.sync_all_streams();
+//     }
+
+//     float2_t* LDInte = new float2_t[n_src];
+//     // 这个找邻居还不太容易
+//     for(int i_src=0;i_src<n_src;i_src++)
+//     {
+//         LDInte[i_src] = 0;
+//         float2_t dphi = 1. / float2_t(int(1<<depth));
+//         for(int i_M0=0;i_M0<M0len;i_M0++)
+//         {
+//             if(i_M0==0 || i_M0==(M0len-1) )
+//             {
+//                 LDInte[i_src] += M0r2_a[i_src*M0len + i_M0];
+//             }
+//             else
+//             {
+//                 if((i_M0 & 1)==1)
+//                 {
+//                     LDInte[i_src] += M0r2_a[i_src*M0len + i_M0] * 4;
+//                 }
+//                 else
+//                 {
+//                     LDInte[i_src] += M0r2_a[i_src*M0len + i_M0] * 2;
+//                 }
+//             }
+//         }
+//         LDInte[i_src] *= dphi*2 / 6;
+
+//         // 再copy回device，有点笨，但先这样吧
+//         pool_mag.dat_h[ i_src ].mag = ((1-LD_a)*M0r2_a[i_src*M0len] + LD_a*LDInte[i_src]) / (1-LD_a/3);
+//     }
+//     f_dev.sync_all_streams(); 
+//     pool_mag.cp_h2d( f_dev );
+//     f_dev.sync_all_streams();  
+
+//     delete[] M0r2_a;
+//     delete[] phi_a;
+//     delete[] LDInte;
+
+//     return;
+// }
+
+__host__ void source_base_t::runLD_A( device_t & f_dev, double LD_a, int max_depth )
+{
+    auto n_bl = ( n_src + n_th - 1 ) / n_th;
+    auto s_sh = 0;
+    auto lpar = std::make_tuple
+        ( dim3( n_bl ), dim3( n_th ), s_sh );
+    f_dev.launch( point_approximation, lpar, stream, ( * this ) );
+    n_bl = n_src;
+    s_sh = sizeof(int)*n_th + 
+    std::max( sizeof(float2_t)*n_point_max, 
+              sizeof(float2_t)   * 8*n_th
+            + sizeof(shared_info_t< float2_t >) * 1 
+            + sizeof(cross_info_t) * n_cross_max * 4
+            + sizeof(src_pt_t< float2_t >) * n_th);
+
+    double RelTolS = RelTol;
+    float2_t* phi_L = new float2_t[n_src];
+    float2_t* phi_R = new float2_t[n_src];
+    float2_t* LDInte = new float2_t[n_src];
+
+    // 为每个源创建一个栈
+    std::stack<double*>* stacks = new std::stack<double*>[n_src];
+    std::map<double, double>* memos = new std::map<double, double>[n_src];
+    
+    // 初始化 memo for phi = [0,0.5,0.25,0.75,1], 这是至少进行的计算量（4倍）
+    // for(float2_t phi : {0.0, 0.5, 0.25, 0.75})
+    // for(float2_t phi : {0.0, 0.5})
+    for(float2_t phi=0; phi<=0.5;phi+=0.5)
+    {
+        // printf("phi: %.6f\n",phi);
+        for(int i_src=0;i_src<n_src;i_src++)
+        {
+            phi_L[i_src] = phi;
+        }
+        lpar = std::make_tuple
+            ( dim3( n_bl ), dim3( n_th ), s_sh );
+        f_dev.launch( solve_LD_sh, lpar, stream, ( * this ), phi_L );
+        f_dev.sync_all_streams();
+        pool_mag.cp_d2h( f_dev );
+        f_dev.sync_all_streams();
+        for(int i_src=0;i_src<n_src;i_src++)
+        {
+            memos[i_src][phi_L[i_src]] = pool_mag.dat_h[ i_src ].mag * (1-phi_L[i_src]*phi_L[i_src]);
+        }
+    }
+    for(int i_src=0;i_src<n_src;i_src++)
+    {
+        memos[i_src][1] = 0.;       // phi = 1 时，M0r2 = 0
+    }
+
+    // 初始化每个栈
+    for (int i_src = 0; i_src < n_src; i_src++) {
+        double a = 0.;
+        double b = 1.;
+        
+        double initial_whole = (memos[i_src][0] + 4*memos[i_src][0.5] + memos[i_src][1]) / 6. * (b-a) ;
+        double* initial_params = new double[5];
+        initial_params[0] = a;
+        initial_params[1] = b;
+        initial_params[2] = RelTolS*initial_whole;
+        initial_params[3] = initial_whole;
+        initial_params[4] = 0.0;  // depth
+        
+        stacks[i_src].push(initial_params);
+        LDInte[i_src] = 0.0;  // 初始化结果，这里需要是0，方便与后面统一
+
+    }
+
+    bool all_empty = false;
+    while(!all_empty)
+    {
+        all_empty = true;
+        for(int i_src=0;i_src<n_src;i_src++)
+        {
+            if(!stacks[i_src].empty())
+            {
+                all_empty = false;
+                double* params = stacks[i_src].top();
+                double a = params[0];
+                double b = params[1];
+                // double eps = params[2];      // not used now
+                double whole = params[3];
+                double depth_value = params[4]; // 注意：深度原本是整数，但我们存储为double
+                int depth = static_cast<int>(depth_value);
+                double c = (a + b) / 2.0;
+                // if(i_src==15)
+                // {
+                //     printf("a: %.16f, b: %.16f, eps: %.16f, whole: %.16f, depth: %d\n",a,b,params[2],whole,depth);
+                // }
+                // 检查深度限制
+                if (depth >= max_depth) {
+                    LDInte[i_src] += whole;
+                    phi_L[i_src] = -1;              // 标记跳过计算
+                    phi_R[i_src] = -1;
+                    // printf("over deep!, i_src=%d, LDInte = %.16f\n", i_src, LDInte[i_src]);
+                    continue;
+                }
+
+                phi_L[i_src] = (a+c) / 2.;
+                phi_R[i_src] = (c+b) / 2.;
+            }
+            else        // 空栈
+            {
+                phi_L[i_src] = -1;
+                phi_R[i_src] = -1;
+            }
+        }
+
+
+        // // 计算左右半区间的Simpson值
+        // double left = simpson(f, memos[i], a, c);
+        // double right = simpson(f, memos[i], c, b);
+        // 左区间中点
+        lpar = std::make_tuple
+            ( dim3( n_bl ), dim3( n_th ), s_sh );
+        f_dev.launch( solve_LD_sh, lpar, stream, ( * this ), phi_L );
+        f_dev.sync_all_streams();
+        pool_mag.cp_d2h( f_dev );
+        f_dev.sync_all_streams();
+        for(int i_src=0;i_src<n_src;i_src++)
+        {
+            memos[i_src][phi_L[i_src]] = pool_mag.dat_h[ i_src ].mag * (1-phi_L[i_src]*phi_L[i_src]);
+        }
+        // 右区间中点
+        lpar = std::make_tuple
+            ( dim3( n_bl ), dim3( n_th ), s_sh );
+        f_dev.launch( solve_LD_sh, lpar, stream, ( * this ), phi_R );
+        f_dev.sync_all_streams();
+        pool_mag.cp_d2h( f_dev );
+        f_dev.sync_all_streams();
+        for(int i_src=0;i_src<n_src;i_src++)
+        {
+            memos[i_src][phi_R[i_src]] = pool_mag.dat_h[ i_src ].mag * (1-phi_R[i_src]*phi_R[i_src]);       // 对于 phi-1缺省值，这个值是0
+        }
+
+        // 继续计算积分
+        for(int i_src=0;i_src<n_src;i_src++)
+        {
+            if(!stacks[i_src].empty())
+            {
+                double* params = stacks[i_src].top();
+                double a = params[0];
+                double b = params[1];
+                double eps = params[2];
+                double whole = params[3];
+                double depth_value = params[4]; // 注意：深度原本是整数，但我们存储为double
+                int depth = static_cast<int>(depth_value);
+                double c = (a + b) / 2.0;
+                delete[] params;
+
+                stacks[i_src].pop();
+
+                if (depth >= max_depth) 
+                {
+                    continue;
+                }
+                double left  = (memos[i_src][a] + 4*memos[i_src][phi_L[i_src]] + memos[i_src][c]) / 6. * (c-a);
+                double right = (memos[i_src][c] + 4*memos[i_src][phi_R[i_src]] + memos[i_src][b]) / 6. * (b-c);
+
+
+                if (std::abs(left + right - whole) <= eps && depth > 1) {
+                    // 满足精度要求，累加结果
+                    LDInte[i_src] += left + right + (left + right - whole) / 15.;       // 15 from Richardson extrapolation
+                }
+                else {
+                    // 不满足精度要求，将两个子区间压入栈
+                    // 深度增加1
+                    // 左子区间参数
+                    double* left_params = new double[5];
+                    left_params[0] = a;
+                    left_params[1] = c;
+                    left_params[2] = eps / 2.0;
+                    left_params[3] = left;
+                    left_params[4] = static_cast<double>(depth + 1);
+                    stacks[i_src].push(left_params);
+                    
+                    // 右子区间参数
+                    double* right_params = new double[5];
+                    right_params[0] = c;
+                    right_params[1] = b;
+                    right_params[2] = eps / 2.0;
+                    right_params[3] = right;
+                    right_params[4] = static_cast<double>(depth + 1);
+                    stacks[i_src].push(right_params);
+
+                }
+            }
+        }        
+                        
+
+    }
+
+
+    for(int i_src=0;i_src<n_src;i_src++)
+    {
+        pool_mag.dat_h[ i_src ].mag = ((1-LD_a)*memos[i_src][0] + LD_a*LDInte[i_src]) / (1-LD_a/3); 
+    }
+    pool_mag.cp_h2d( f_dev );
+    f_dev.sync_all_streams();
+
+
+    delete[] LDInte;
+    delete[] stacks;
+    delete[] memos;
+    delete[] phi_L;
+    delete[] phi_R;
 
     return;
 }

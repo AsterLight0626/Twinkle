@@ -1,4 +1,5 @@
 # python setup.py build_ext --inplace
+# python setup.py install
 
 from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext

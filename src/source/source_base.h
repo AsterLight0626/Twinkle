@@ -7,6 +7,9 @@
 #include "./types/extended_src.h"
 #include "./types/pool.h"
 #include "./types/sh_manager.h"
+#include <map>
+#include <stack>
+
 
 namespace twinkle
 {
@@ -27,6 +30,161 @@ __global__ void point_approximation( const src_T src )
 }
 
 
+// template< class src_T >
+// __global__ void solve_extended_sh_old( const src_T src )      // 不用 const 因为 batchidx 会修改，但也可能不需要？在这里面就行？
+// {
+//     __dyn_shared__( char, dat_sh );
+
+//     const int i_src = blockIdx.x;
+//     if( i_src >= src.n_src )
+//         return;
+//     if( threadIdx.x >= src.n_th )
+//         return;
+
+//     local_info_t< float2_t > local_info;
+
+//     // input
+//     local_info.setup_mem( dat_sh );
+//     local_info.src_shape = src.pool_center [ i_src ];
+//     local_info.src_ext = src.pool_extended [ i_src ];
+//     local_info.src_ret = src.pool_mag      [ i_src ];
+//     local_info.batchidx = 0;
+//     local_info.lens_s = src.pool_lens_s [ i_src ];
+
+//     if( threadIdx.x == 0 )
+//     {
+//         local_info.shared_info->Break = local_info.src_ext.Break;
+//     }
+//     __syncthreads();
+
+//     // calculation
+//     for(int bcidx=0;bcidx < (src.n_point_max / src.n_th) ;bcidx++)
+//     // for(int bcidx=0;bcidx < 6 ;bcidx++)
+//     {
+//         if((local_info.src_ext.SolveSucceed)||(local_info.shared_info->Break)){break;}
+
+//         if(local_info.batchidx==0){src.margin_set_local( local_info );}
+//         else{src.adap_set_g( local_info );}
+//         __syncthreads();
+//         src.margin_solve_local( local_info );
+//         __syncthreads();
+//         src.neighbor3_info_g( local_info );         // g 只体现在读入相邻旧点的 src_pt 上, 可以依据 skip 情况直接修改局域的 prev/next_src_idx
+//         __syncthreads(); 
+//         src.connect_next_local( local_info );
+//         __syncthreads();
+
+//         if( threadIdx.x == 0 )
+//         {
+//             local_info.shared_info->Ncross = 0;
+//             local_info.shared_info->deltaS_cross_global = 0;
+//             local_info.shared_info->Err_cross_global = 0;
+//         }
+//         __syncthreads();
+//         src.slope_test_local( local_info );
+//         __syncthreads();        
+
+//         if(local_info.shared_info->Ncross > 0  && (!local_info.shared_info->Break))
+//         {
+//             {
+//                 // shared neighbor02 to global
+//                 if( local_info.neighbor3[0] < local_info.batchidx * src.n_th )
+//                 {
+//                     for(int j=3;j<5;j++)
+//                     {
+//                         src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].next_idx[j] = local_info.pt_prev.next_idx[j];
+//                         src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].next_j[j] = local_info.pt_prev.next_j[j];
+//                     }
+//                     src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].next_src_idx = local_info.pt_prev.next_src_idx;
+//                 }
+//                 src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[1]] = local_info.new_pts[ threadIdx.x ];
+//                 if( local_info.neighbor3[2] < local_info.batchidx * src.n_th )
+//                 {
+//                     for(int j=0;j<3;j++)
+//                     {
+//                         src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].next_idx[j] = local_info.pt_next.next_idx[j];
+//                         src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].next_j[j] = local_info.pt_next.next_j[j];
+//                     }
+//                     src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].prev_src_idx = local_info.pt_next.prev_src_idx;
+//                 }
+//                 __syncthreads();
+
+//                 src.slope_detector_g( local_info );
+//                 __syncthreads(); 
+
+//                 local_info.pt_prev = src.pool_margin[ blockIdx.x * src.n_point_max + local_info.neighbor3[0] ];
+//                 local_info.pt_next = src.pool_margin[ blockIdx.x * src.n_point_max + local_info.neighbor3[2] ];
+//                 local_info.new_pts[ threadIdx.x ] = src.pool_margin[ blockIdx.x * src.n_point_max + local_info.neighbor3[1] ];
+//                 __syncthreads();
+//             }
+//         }
+
+//         src.area_err_local( local_info );
+//         __syncthreads();
+
+//         if(local_info.batchidx>=4)
+//         {
+//             src.sum_area_3_local( local_info );
+//             __syncthreads();             
+//         }
+       
+//         // shared neighbor02 to global
+//         if(! local_info.new_pts[ threadIdx.x ].skip)
+//         {
+//             if( local_info.neighbor3[0] < local_info.batchidx * src.n_th )
+//             {
+//                 // {src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]] = local_info.pt_prev;}
+//                 for(int j=3;j<5;j++)
+//                 {
+//                     src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].deltaS[j] = local_info.pt_prev.deltaS[j];
+//                     src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].deltaS_Err[j] = local_info.pt_prev.deltaS_Err[j];
+//                     src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].next_idx[j] = local_info.pt_prev.next_idx[j];
+//                     src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].next_j[j] = local_info.pt_prev.next_j[j];
+//                 }
+//                 src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].area_interval = local_info.pt_prev.area_interval;
+//                 src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].error_interval = local_info.pt_prev.error_interval;
+//                 // src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].next_src_idx = local_info.pt_prev.next_src_idx;       // adap 里面已经把 global 的信息改好了
+//             }
+//             src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[1]] = local_info.new_pts[ threadIdx.x ];
+//             if( local_info.neighbor3[2] < local_info.batchidx * src.n_th )
+//             {
+//                 // {src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]] = local_info.pt_next;}
+//                 for(int j=0;j<3;j++)
+//                 {
+//                     src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].deltaS[j] = local_info.pt_next.deltaS[j];
+//                     src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].deltaS_Err[j] = local_info.pt_next.deltaS_Err[j];
+//                     src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].next_idx[j] = local_info.pt_next.next_idx[j];
+//                     src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].next_j[j] = local_info.pt_next.next_j[j];
+//                 }
+//                 // src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].prev_src_idx = local_info.pt_next.prev_src_idx;
+//             }
+//         }
+//         else
+//         {
+//             src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[1]] = local_info.new_pts[ threadIdx.x ];
+//         }
+//         __syncthreads();
+//         // shared neighbor02 to global
+
+//         if(bcidx<4)
+//         {
+//             src.sum_area_0_g( local_info );
+//             __syncthreads();
+//         }
+        
+//         local_info.batchidx += 1;
+//     }
+
+//     __syncthreads();
+//     if(threadIdx.x == 0)                // 最后才输出
+//     {
+//         // local_info.src_ext.SolveSucceed = local_info.shared_info->SolveSucceed;
+//         local_info.src_ext.Break = local_info.shared_info->Break;
+//         src.pool_extended[ i_src ] = local_info.src_ext;
+//         src.pool_mag[ i_src ] = local_info.src_ret;
+//     }
+
+// }
+
 template< class src_T >
 __global__ void solve_extended_sh( const src_T src )      // 不用 const 因为 batchidx 会修改，但也可能不需要？在这里面就行？
 {
@@ -45,133 +203,11 @@ __global__ void solve_extended_sh( const src_T src )      // 不用 const 因为
     local_info.src_shape = src.pool_center [ i_src ];
     local_info.src_ext = src.pool_extended [ i_src ];
     local_info.src_ret = src.pool_mag      [ i_src ];
-    local_info.batchidx = 0;
     local_info.lens_s = src.pool_lens_s [ i_src ];
 
-    if( threadIdx.x == 0 )
-    {
-        local_info.shared_info->Break = local_info.src_ext.Break;
-    }
-    __syncthreads();
+    local_info.batchidx = 0;
+    src.solve_extended_uniform(local_info, i_src);
 
-    // calculation
-    for(int bcidx=0;bcidx < (src.n_point_max / src.n_th) ;bcidx++)
-    // for(int bcidx=0;bcidx < 6 ;bcidx++)
-    {
-        if((local_info.src_ext.SolveSucceed)||(local_info.shared_info->Break)){break;}
-
-        if(local_info.batchidx==0){src.margin_set_local( local_info );}
-        else{src.adap_set_g( local_info );}
-        __syncthreads();
-        src.margin_solve_local( local_info );
-        __syncthreads();
-        src.neighbor3_info_g( local_info );         // g 只体现在读入相邻旧点的 src_pt 上, 可以依据 skip 情况直接修改局域的 prev/next_src_idx
-        __syncthreads(); 
-        src.connect_next_local( local_info );
-        __syncthreads();
-
-        if( threadIdx.x == 0 )
-        {
-            local_info.shared_info->Ncross = 0;
-            local_info.shared_info->deltaS_cross_global = 0;
-            local_info.shared_info->Err_cross_global = 0;
-        }
-        __syncthreads();
-        src.slope_test_local( local_info );
-        __syncthreads();        
-
-        if(local_info.shared_info->Ncross > 0  && (!local_info.shared_info->Break))
-        {
-            {
-                // shared neighbor02 to global
-                if( local_info.neighbor3[0] < local_info.batchidx * src.n_th )
-                {
-                    for(int j=3;j<5;j++)
-                    {
-                        src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].next_idx[j] = local_info.pt_prev.next_idx[j];
-                        src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].next_j[j] = local_info.pt_prev.next_j[j];
-                    }
-                    src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].next_src_idx = local_info.pt_prev.next_src_idx;
-                }
-                src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[1]] = local_info.new_pts[ threadIdx.x ];
-                if( local_info.neighbor3[2] < local_info.batchidx * src.n_th )
-                {
-                    for(int j=0;j<3;j++)
-                    {
-                        src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].next_idx[j] = local_info.pt_next.next_idx[j];
-                        src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].next_j[j] = local_info.pt_next.next_j[j];
-                    }
-                    src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].prev_src_idx = local_info.pt_next.prev_src_idx;
-                }
-                __syncthreads();
-
-                src.slope_detector_g( local_info );
-                __syncthreads(); 
-
-                local_info.pt_prev = src.pool_margin[ blockIdx.x * src.n_point_max + local_info.neighbor3[0] ];
-                local_info.pt_next = src.pool_margin[ blockIdx.x * src.n_point_max + local_info.neighbor3[2] ];
-                local_info.new_pts[ threadIdx.x ] = src.pool_margin[ blockIdx.x * src.n_point_max + local_info.neighbor3[1] ];
-                __syncthreads();
-            }
-        }
-
-        src.area_err_local( local_info );
-        __syncthreads();
-
-        if(local_info.batchidx>=4)
-        {
-            src.sum_area_3_local( local_info );
-            __syncthreads();             
-        }
-       
-        // shared neighbor02 to global
-        if(! local_info.new_pts[ threadIdx.x ].skip)
-        {
-            if( local_info.neighbor3[0] < local_info.batchidx * src.n_th )
-            {
-                // {src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]] = local_info.pt_prev;}
-                for(int j=3;j<5;j++)
-                {
-                    src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].deltaS[j] = local_info.pt_prev.deltaS[j];
-                    src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].deltaS_Err[j] = local_info.pt_prev.deltaS_Err[j];
-                    src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].next_idx[j] = local_info.pt_prev.next_idx[j];
-                    src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].next_j[j] = local_info.pt_prev.next_j[j];
-                }
-                src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].area_interval = local_info.pt_prev.area_interval;
-                src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].error_interval = local_info.pt_prev.error_interval;
-                // src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[0]].next_src_idx = local_info.pt_prev.next_src_idx;       // adap 里面已经把 global 的信息改好了
-            }
-            src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[1]] = local_info.new_pts[ threadIdx.x ];
-            if( local_info.neighbor3[2] < local_info.batchidx * src.n_th )
-            {
-                // {src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]] = local_info.pt_next;}
-                for(int j=0;j<3;j++)
-                {
-                    src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].deltaS[j] = local_info.pt_next.deltaS[j];
-                    src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].deltaS_Err[j] = local_info.pt_next.deltaS_Err[j];
-                    src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].next_idx[j] = local_info.pt_next.next_idx[j];
-                    src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].next_j[j] = local_info.pt_next.next_j[j];
-                }
-                // src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[2]].prev_src_idx = local_info.pt_next.prev_src_idx;
-            }
-        }
-        else
-        {
-            src.pool_margin[i_src * src.n_point_max + local_info.neighbor3[1]] = local_info.new_pts[ threadIdx.x ];
-        }
-        __syncthreads();
-        // shared neighbor02 to global
-
-        if(bcidx<4)
-        {
-            src.sum_area_0_g( local_info );
-            __syncthreads();
-        }
-        
-        local_info.batchidx += 1;
-    }
-
-    __syncthreads();
     if(threadIdx.x == 0)                // 最后才输出
     {
         // local_info.src_ext.SolveSucceed = local_info.shared_info->SolveSucceed;
@@ -182,7 +218,59 @@ __global__ void solve_extended_sh( const src_T src )      // 不用 const 因为
 
 }
 
+template< class src_T >
+__global__ void solve_LD_sh( const src_T src, float2_t* phi_a )      // 不用 const 因为 batchidx 会修改，但也可能不需要？在这里面就行？
+{
+    __dyn_shared__( char, dat_sh );
 
+    const int i_src = blockIdx.x;
+    if( i_src >= src.n_src )
+        return;
+    if( threadIdx.x >= src.n_th )
+        return;
+    float2_t phi = phi_a[ i_src ];
+    if ((phi >= 1) || (phi<0))
+        return;
+
+    float2_t M0;
+    local_info_t< float2_t > local_info;
+
+    // input
+    local_info.setup_mem( dat_sh );
+    local_info.src_shape = src.pool_center [ i_src ];
+    local_info.src_ext = src.pool_extended [ i_src ];
+    local_info.src_ret = src.pool_mag      [ i_src ];
+    local_info.lens_s = src.pool_lens_s [ i_src ];
+
+    // auto M0r2_phi = [&src, &local_info, i_src] __device__ (auto phi) {
+    //     return src.M0r2(local_info, i_src, phi);
+    // };
+    // M0r2 = M0r2_phi(phi);
+
+    // // r=1
+    // phi = 0;
+    // r2 = 1-phi*phi;
+    // local_info.batchidx = 0;
+    // local_info.src_ext.SolveSucceed = false;
+    // local_info.src_ext.Break = false;
+    // local_info.src_shape.src_area = src.pool_center[ i_src ].src_area * r2;
+    // local_info.src_shape.rho = src.pool_center [ i_src ].rho * sqrt(r2);
+    // src.solve_extended_uniform(local_info, i_src);
+
+    // phi = 0.5;
+    M0 = src.M0_phi(local_info, i_src, phi);
+
+
+    if(threadIdx.x == 0)                // 最后才输出
+    {
+        // // local_info.src_ext.SolveSucceed = local_info.shared_info->SolveSucceed;
+        // local_info.src_ext.Break = local_info.shared_info->Break;
+        // src.pool_extended[ i_src ] = local_info.src_ext;
+        // src.pool_mag[ i_src ] = local_info.src_ret;
+        src.pool_mag[ i_src ].mag = M0;
+    }
+
+}
 
 
 ////////////////////////////////////////////////////////////
@@ -399,9 +487,14 @@ public:                         // Functions
 
     __device__ void adap_set_g        ( local_info_t<f_t>& local_info ) const;
 
+    __device__ void solve_extended_uniform( local_info_t<f_t>& local_info, const int i_src ) const;
+    __device__  f_t M0_phi( local_info_t<f_t>& local_info, const int i_src, const f_t phi ) const;
+
     ////////// Host-side interfaces //////////
 public:
     __host__ virtual void run( device_t & f_dev );
+    // __host__ virtual void runLD( device_t & f_dev, double LD_a=1, int depth=4 );
+    __host__ virtual void runLD_A( device_t & f_dev, double LD_a=1, int max_depth=10 );
 };                              // class source_base_t
 
 };                              // namespace twinkle

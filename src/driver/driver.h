@@ -40,6 +40,7 @@ public:
     ////////// Overall interface //////////
 public:
     virtual void run(  );
+    virtual void runLD( double LD_a=1 );
 };
 
 };
