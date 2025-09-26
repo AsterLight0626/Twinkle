@@ -33,19 +33,18 @@ int main()
     // driver.set_params(ss,qq,rho,RelTol,xs,ys);
     driver.set_params(ss,qq,rho,xs,ys);
 
-    driver.runLD ( 1.0 );
+    // driver.run(  );             // uniform brightness, faster
+    double LD_a = 1.0;          // linear limb darkening coefficient
+    driver.runLD ( LD_a );
     // driver.p_dev->sync_all_streams(  );        
 
     double magnification[Nsrcs];
     driver.return_mag_to(magnification);
 
-    // printf("mag[2]: %.16f\n",magnification[2]);
-    // printf("mag[12]: %.16f\n",magnification[12]);
-
     std::ofstream outfile("magnitude_data.txt");
     if (outfile.is_open()) {
-        outfile.precision(16); // 设置16位小数精度
-        outfile << std::fixed; // 固定小数点格式
+        outfile.precision(16);
+        outfile << std::fixed;
         for(int i_src=0;i_src<Nsrcs;i_src++)
         {
             outfile << magnification[i_src] << std::endl;
