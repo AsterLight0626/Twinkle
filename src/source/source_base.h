@@ -219,7 +219,7 @@ __global__ void solve_extended_sh( const src_T src )      // 不用 const 因为
 }
 
 template< class src_T >
-__global__ void solve_LD_sh( const src_T src, float2_t* phi_a )      // 不用 const 因为 batchidx 会修改，但也可能不需要？在这里面就行？
+__global__ void solve_LD_sh( const src_T src )      // 不用 const 因为 batchidx 会修改，但也可能不需要？在这里面就行？
 {
     __dyn_shared__( char, dat_sh );
 
@@ -228,7 +228,8 @@ __global__ void solve_LD_sh( const src_T src, float2_t* phi_a )      // 不用 c
         return;
     if( threadIdx.x >= src.n_th )
         return;
-    float2_t phi = phi_a[ i_src ];
+    // float2_t phi = phi_a[ i_src ];
+    float2_t phi = src.pool_phi[ i_src ];
     if ((phi >= 1) || (phi<0))
         return;
 
@@ -311,6 +312,7 @@ public:                      // Data
     pool_t< src_pt_t    < f_t > > pool_margin;
     pool_t< src_ext_t   < f_t > > pool_extended;
     pool_t<               f_t   > pool_lens_s;
+    pool_t<               f_t   >    pool_phi;
 public:                         // Functions
     __host__ virtual void init( device_t & f_dev );
     // __host__ virtual void set_params_2D( device_t & f_dev, f_t ss, f_t qq, f_t rho, f_t xmax, f_t xmin, f_t ymax, f_t ymin, int Nx, int Ny );

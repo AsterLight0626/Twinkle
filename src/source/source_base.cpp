@@ -35,6 +35,7 @@ __host__ void source_base_t::init( device_t & f_dev )
     pool_mag   .setup_mem( f_dev, n_src );
     pool_extended   .setup_mem( f_dev, n_src );
     pool_lens_s.setup_mem( f_dev, n_src );
+    pool_phi.setup_mem( f_dev, n_src );
 
     stream = f_dev.yield_stream(  );
 
@@ -3447,10 +3448,14 @@ __host__ void source_base_t::runLD_A( device_t & f_dev, double LD_a, int max_dep
         for(int i_src=0;i_src<n_src;i_src++)
         {
             phi_L[i_src] = phi;
+            pool_phi.dat_h[ i_src ] = phi_L[i_src];
         }
+        f_dev.sync_all_streams();
+        pool_phi.cp_h2d( f_dev );
+        f_dev.sync_all_streams();
         lpar = std::make_tuple
             ( dim3( n_bl ), dim3( n_th ), s_sh );
-        f_dev.launch( solve_LD_sh, lpar, stream, ( * this ), phi_L );
+        f_dev.launch( solve_LD_sh, lpar, stream, ( * this ) );
         f_dev.sync_all_streams();
         pool_mag.cp_d2h( f_dev );
         f_dev.sync_all_streams();
@@ -3527,9 +3532,16 @@ __host__ void source_base_t::runLD_A( device_t & f_dev, double LD_a, int max_dep
         // double left = simpson(f, memos[i], a, c);
         // double right = simpson(f, memos[i], c, b);
         // 左区间中点
+        for(int i_src=0;i_src<n_src;i_src++)
+        {
+            pool_phi.dat_h[ i_src ] = phi_L[i_src];
+        }
+        f_dev.sync_all_streams();
+        pool_phi.cp_h2d( f_dev );
+        f_dev.sync_all_streams();
         lpar = std::make_tuple
             ( dim3( n_bl ), dim3( n_th ), s_sh );
-        f_dev.launch( solve_LD_sh, lpar, stream, ( * this ), phi_L );
+        f_dev.launch( solve_LD_sh, lpar, stream, ( * this ) );
         f_dev.sync_all_streams();
         pool_mag.cp_d2h( f_dev );
         f_dev.sync_all_streams();
@@ -3538,9 +3550,16 @@ __host__ void source_base_t::runLD_A( device_t & f_dev, double LD_a, int max_dep
             memos[i_src][phi_L[i_src]] = pool_mag.dat_h[ i_src ].mag * (1-phi_L[i_src]*phi_L[i_src]);
         }
         // 右区间中点
+        for(int i_src=0;i_src<n_src;i_src++)
+        {
+            pool_phi.dat_h[ i_src ] = phi_R[i_src];
+        }
+        f_dev.sync_all_streams();
+        pool_phi.cp_h2d( f_dev );
+        f_dev.sync_all_streams();
         lpar = std::make_tuple
             ( dim3( n_bl ), dim3( n_th ), s_sh );
-        f_dev.launch( solve_LD_sh, lpar, stream, ( * this ), phi_R );
+        f_dev.launch( solve_LD_sh, lpar, stream, ( * this ) );
         f_dev.sync_all_streams();
         pool_mag.cp_d2h( f_dev );
         f_dev.sync_all_streams();
