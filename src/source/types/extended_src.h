@@ -55,6 +55,7 @@ struct    shared_info_t
 	// bool                SolveSucceed;
 	bool                       Break;   
 	int Ncross;
+	int Ncross_all;
 	// int in_global;
 	f_T deltaS_cross_global;
 	f_T    Err_cross_global;

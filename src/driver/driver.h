@@ -25,6 +25,8 @@ public:
     virtual void set_params( double ss, double qq, double rho, double* xs, double* ys );
     virtual void set_params( const double* ss, double qq, double rho, double* xs, double* ys );
     virtual void return_mag_to( double* mag );
+    virtual void return_mag_err_to( double* mag, double* err );
+    virtual void return_Ncross_to( int* Ncross );
     virtual void free(  );    
 
     int n_srcs_all;
@@ -40,7 +42,12 @@ public:
     ////////// Overall interface //////////
 public:
     virtual void run(  );
-    virtual void runLD( double LD_a=1 );
+    virtual void run_pt(  );
+    virtual void runLD( double LD_a=1, int* Nuniform=nullptr );
+    virtual void runLD1( double LD_a=1 );
+    virtual void runLD2( double LD_a=1 );
+    virtual void runLD_Nuniform( double LD_a, int* Nuniform );
+    virtual void runLD_beta( double LD_a, int* Nuniform );
 };
 
 };

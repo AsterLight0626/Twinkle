@@ -1,3 +1,13 @@
+// Root solving algorithm from Skowron & Gould (2012) [arXiv:1203.1034].
+// Original Fortran code: http://www.astrouw.edu.pl/~jskowron/cmplx_roots_sg/
+// C++ translation by Tyler M. Heintz and Ava R. Hoag (2017).
+//
+// If this code contributes to scientific work, please cite the paper.
+//
+// The original routines are distributed under the terms of the
+// GNU Lesser General Public License version 2 or later, OR the
+// Apache License, Version 2.0.
+
 #pragma once
 
 #include <type_traits>
@@ -12,194 +22,194 @@ static const int MAXIT = 80;
 static const int FRAC_JUMP_EVERY = 16;      // must be 2^n
 
 template< class c_T >
-__device__ bool cmplx_roots_gen(c_T *roots, c_T *poly, int degree, bool polish_roots_after, bool use_roots_as_starting_points);
+__host__ __device__ bool cmplx_roots_gen(c_T *roots, c_T *poly, int degree, bool polish_roots_after, bool use_roots_as_starting_points);
 template< class img_T, class c_T >
-__device__ bool cmplx_roots_gen( img_T *imgs, c_T *poly, int degree, bool polish_roots_after, bool use_roots_as_starting_points);
+__host__ __device__ bool cmplx_roots_gen( img_T *imgs, c_T *poly, int degree, bool polish_roots_after, bool use_roots_as_starting_points);
 template<class c_T>
-__device__ void solve_quadratic_eq(c_T &x0, c_T &x1, c_T *poly);
+__host__ __device__ void solve_quadratic_eq(c_T &x0, c_T &x1, c_T *poly);
 template< class c_T >
-__device__ void cmplx_newton_spec(c_T *poly, int degree, c_T *root, int &iter, bool &success);
+__host__ __device__ void cmplx_newton_spec(c_T *poly, int degree, c_T *root, int &iter, bool &success);
 template<class c_T>
-__device__ void cmplx_laguerre(c_T *poly, int degree, c_T *root, int &iter, bool &success);
+__host__ __device__ void cmplx_laguerre(c_T *poly, int degree, c_T *root, int &iter, bool &success);
 template< class c_T >
-__device__ void cmplx_laguerre2newton(c_T *poly, int degree, c_T *root, int &iter, bool &success, int starting_mode);
+__host__ __device__ void cmplx_laguerre2newton(c_T *poly, int degree, c_T *root, int &iter, bool &success, int starting_mode);
 
 template< class c_T >
-__device__ __forceinline__ auto abs_c( const c_T & z )
+__host__ __device__ __forceinline__ auto abs_c( const c_T & z )
 {
     return z.abs(  );
 };
 template< class c_T >
-__device__ __forceinline__ auto real ( const c_T & z )
+__host__ __device__ __forceinline__ auto real ( const c_T & z )
 {
     return z.re;
 };
 template< class c_T >
-__device__ __forceinline__ auto imag ( const c_T & z )
+__host__ __device__ __forceinline__ auto imag ( const c_T & z )
 {
     return z.im;
 };
 template< class c_T >
-__device__ __forceinline__ auto conj ( const c_T & z )
+__host__ __device__ __forceinline__ auto conj ( const c_T & z )
 {
     return z.conj(  );
 };
 template< class c_T >
-__device__ __forceinline__ auto sqrt ( const c_T & z )
+__host__ __device__ __forceinline__ auto sqrt ( const c_T & z )
 {
     return z.sqrt(  );
 };
 template< class c_T >
-__device__ __forceinline__ auto norm ( const c_T & z )
+__host__ __device__ __forceinline__ auto norm ( const c_T & z )
 {
     return z.norm2(  );
 };
 
 
-template< class c_T >
-__device__ bool cmplx_roots_gen(c_T *roots, c_T *poly, int degree, bool polish_roots_after, bool use_roots_as_starting_points)
-{
-    using f_T = typename c_T::f_t;
+// template< class c_T >
+// __host__ __device__ bool cmplx_roots_gen(c_T *roots, c_T *poly, int degree, bool polish_roots_after, bool use_roots_as_starting_points)
+// {
+//     using f_T = typename c_T::f_t;
     
-	//roots - array which will hold all roots that had been found.
-	//If the flag 'use_roots_as_starting_points' is set to
-	//.true., then instead of point(0, 0) we use value from
-	//this array as starting point for cmplx_laguerre
+// 	//roots - array which will hold all roots that had been found.
+// 	//If the flag 'use_roots_as_starting_points' is set to
+// 	//.true., then instead of point(0, 0) we use value from
+// 	//this array as starting point for cmplx_laguerre
 
-	//poly - is an array of polynomial cooefs, length = degree + 1,
-	//poly[0] x ^ 0 + poly[1] x ^ 1 + poly[2] x ^ 2 + ...
+// 	//poly - is an array of polynomial cooefs, length = degree + 1,
+// 	//poly[0] x ^ 0 + poly[1] x ^ 1 + poly[2] x ^ 2 + ...
 
-	//degree - degree of the polynomial and size of 'roots' array
+// 	//degree - degree of the polynomial and size of 'roots' array
 
-	//polish_roots_after - after all roots have been found by dividing
-	//original polynomial by each root found,
-	//you can opt in to polish all roots using full
-	//polynomial
+// 	//polish_roots_after - after all roots have been found by dividing
+// 	//original polynomial by each root found,
+// 	//you can opt in to polish all roots using full
+// 	//polynomial
 
-	//use_roots_as_starting_points - usually we start Laguerre's 
-	//method from point(0, 0), but you can decide to use the
-	//values of 'roots' array as starting point for each new
-	//root that is searched for.This is useful if you have
-	//very rough idea where some of the roots can be.
-	//
+// 	//use_roots_as_starting_points - usually we start Laguerre's 
+// 	//method from point(0, 0), but you can decide to use the
+// 	//values of 'roots' array as starting point for each new
+// 	//root that is searched for.This is useful if you have
+// 	//very rough idea where some of the roots can be.
+// 	//
 
-	// c_T* poly2 = new c_T[degree+1];
-	c_T poly2[6];
-	// static int i, j, n, iter;
-    int iter;
-	bool success;
-	c_T coef, prev;
+// 	// c_T* poly2 = new c_T[degree+1];
+// 	c_T poly2[6];
+// 	// static int i, j, n, iter;
+//     int iter;
+// 	bool success;
+// 	c_T coef, prev;
 
-	if (!use_roots_as_starting_points) {
-		for (int jj = 0; jj < degree; jj++)
-            roots[ jj ].set( 0, 0 );
-        // {
-		// 	roots[jj].re = 0;
-		// 	roots[jj].im = 0; //c_T( 0 );
-		// }
-	}
+// 	if (!use_roots_as_starting_points) {
+// 		for (int jj = 0; jj < degree; jj++)
+//             roots[ jj ].set( 0, 0 );
+//         // {
+// 		// 	roots[jj].re = 0;
+// 		// 	roots[jj].im = 0; //c_T( 0 );
+// 		// }
+// 	}
 
-	for (int j = 0; j <= degree; j++){ poly2[j] = poly[j]; }
+// 	for (int j = 0; j <= degree; j++){ poly2[j] = poly[j]; }
 
-	// Don't do Laguerre's for small degree polynomials
-	if (degree <= 1) {
-		if (degree == 1) roots[0] = -poly[0] / poly[1];
-		return false;
-	}
+// 	// Don't do Laguerre's for small degree polynomials
+// 	if (degree <= 1) {
+// 		if (degree == 1) roots[0] = -poly[0] / poly[1];
+// 		return false;
+// 	}
 
-	for (int n = degree; n >= 3; n--) {
-		cmplx_laguerre2newton(poly2, n, &roots[n - 1], iter, success, 2);        // iter means iteration steps, 2 is "starting mode"
-		if (!success) {
-			roots[n - 1].set(0, 0);
-			cmplx_laguerre(poly2, n, &roots[n - 1], iter, success);
-		}
+// 	for (int n = degree; n >= 3; n--) {
+// 		cmplx_laguerre2newton(poly2, n, &roots[n - 1], iter, success, 2);        // iter means iteration steps, 2 is "starting mode"
+// 		if (!success) {
+// 			roots[n - 1].set(0, 0);
+// 			cmplx_laguerre(poly2, n, &roots[n - 1], iter, success);
+// 		}
 
-		// Divide by root
-		coef = poly2[n];
-		for (int i = n - 1; i >= 0; i--) {
-			prev = poly2[i];
-			poly2[i] = coef;
-			coef *= prev + roots[n - 1];
-		}
-	}
-
-
-	//Find the to last 2 roots
-	solve_quadratic_eq(roots[1], roots[0], poly2);
-	//cmplx_laguerre2newton(poly2, 2, &roots[1], iter, success, 2);
-	//if (!success) {
-	//	solve_quadratic_eq(roots[1], roots[0], poly2);
-	//}
-	//else {
-	//	roots[0] = -(roots[1] + poly2[1] / poly2[2]); // Viete's Formula for the last root
-	//}
+// 		// Divide by root
+// 		coef = poly2[n];
+// 		for (int i = n - 1; i >= 0; i--) {
+// 			prev = poly2[i];
+// 			poly2[i] = coef;
+// 			coef *= prev + roots[n - 1];
+// 		}
+// 	}
 
 
+// 	//Find the to last 2 roots
+// 	solve_quadratic_eq(roots[1], roots[0], poly2);
+// 	//cmplx_laguerre2newton(poly2, 2, &roots[1], iter, success, 2);
+// 	//if (!success) {
+// 	//	solve_quadratic_eq(roots[1], roots[0], poly2);
+// 	//}
+// 	//else {
+// 	//	roots[0] = -(roots[1] + poly2[1] / poly2[2]); // Viete's Formula for the last root
+// 	//}
 
-	if (polish_roots_after) {
-		for (int n = 0; n < degree; n++) {
-			cmplx_newton_spec(poly, degree, &roots[n], iter, success); // Polish roots with full polynomial
-		}
-	}
 
-	c_T& sum = coef;
-	c_T& multi = prev;
-	// use Viete's Formula to test if get repeated solution
-	sum.set(0,0);
-	multi.set(1,0);
-	bool failed( false );
-	// sign = ((degree & 1)==1)?-1:1; // degree is odd: negative, even: positive
+
+// 	if (polish_roots_after) {
+// 		for (int n = 0; n < degree; n++) {
+// 			cmplx_newton_spec(poly, degree, &roots[n], iter, success); // Polish roots with full polynomial
+// 		}
+// 	}
+
+// 	c_T& sum = coef;
+// 	c_T& multi = prev;
+// 	// use Viete's Formula to test if get repeated solution
+// 	sum.set(0,0);
+// 	multi.set(1,0);
+// 	bool failed( false );
+// 	// sign = ((degree & 1)==1)?-1:1; // degree is odd: negative, even: positive
 	
-	for(int j=0;j<degree;j++)
-	{
-		sum   += roots[ j ];
-		multi += roots[ j ];
-	}
+// 	for(int j=0;j<degree;j++)
+// 	{
+// 		sum   += roots[ j ];
+// 		multi += roots[ j ];
+// 	}
 
 
-	if constexpr ( std::is_same_v< f_T, double > )
-	{
-		if((degree & 1)==1)
-		{
-			failed = (norm(multi + poly[0]/poly[degree])<1e-10f);
-		}
-		else
-		{
-			failed = (norm(multi - poly[0]/poly[degree])<1e-10f);
-		}
-		failed = !(norm(sum + poly[degree-1]/poly[degree])<1e-10  && failed);
+// 	if constexpr ( std::is_same_v< f_T, double > )
+// 	{
+// 		if((degree & 1)==1)
+// 		{
+// 			failed = (norm(multi + poly[0]/poly[degree])<1e-10f);
+// 		}
+// 		else
+// 		{
+// 			failed = (norm(multi - poly[0]/poly[degree])<1e-10f);
+// 		}
+// 		failed = !(norm(sum + poly[degree-1]/poly[degree])<1e-10  && failed);
 
-	}
-	else
-	{
-		if constexpr (std::is_same_v< f_T, float >)
-		{
-			if((degree & 1)==1)
-			{
-				failed = (norm(multi + poly[0]/poly[degree])<1e-5f);
-			}
-			else
-			{
-				failed = (norm(multi - poly[0]/poly[degree])<1e-5f);
-			}
-			failed = !(norm(sum + poly[degree-1]/poly[degree])<1e-5f  && failed);
+// 	}
+// 	else
+// 	{
+// 		if constexpr (std::is_same_v< f_T, float >)
+// 		{
+// 			if((degree & 1)==1)
+// 			{
+// 				failed = (norm(multi + poly[0]/poly[degree])<1e-5f);
+// 			}
+// 			else
+// 			{
+// 				failed = (norm(multi - poly[0]/poly[degree])<1e-5f);
+// 			}
+// 			failed = !(norm(sum + poly[degree-1]/poly[degree])<1e-5f  && failed);
 
-			// if(! (norm(sum + poly[degree-1]/poly[degree])<1e-5 && norm(multi - sign*poly[0]/poly[degree])<1e-5))
-			// {
-			// 	failed = true;
-			// }
-		}
-		else{failed = true;}		
-	}
+// 			// if(! (norm(sum + poly[degree-1]/poly[degree])<1e-5 && norm(multi - sign*poly[0]/poly[degree])<1e-5))
+// 			// {
+// 			// 	failed = true;
+// 			// }
+// 		}
+// 		else{failed = true;}		
+// 	}
 
 
-    // delete[] poly2;
+//     // delete[] poly2;
 
-	return failed;
-}
+// 	return failed;
+// }
 
 template< class img_T, class c_T >
-__device__ bool cmplx_roots_gen( img_T *imgs, c_T *poly, int degree, bool polish_roots_after, bool use_roots_as_starting_points)
+__host__ __device__ bool cmplx_roots_gen( img_T *imgs, c_T *poly, int degree, bool polish_roots_after, bool use_roots_as_starting_points)
 {
     using f_T = typename c_T::f_t;
     
@@ -338,7 +348,7 @@ __device__ bool cmplx_roots_gen( img_T *imgs, c_T *poly, int degree, bool polish
 }
 
 template<class c_T>
-__device__ void solve_quadratic_eq(c_T &x0, c_T &x1, c_T *poly)
+__host__ __device__ void solve_quadratic_eq(c_T &x0, c_T &x1, c_T *poly)
 {
     using f_T = typename c_T::f_t;
     
@@ -363,7 +373,7 @@ __device__ void solve_quadratic_eq(c_T &x0, c_T &x1, c_T *poly)
 }
 
 template< class c_T >
-__device__ void cmplx_newton_spec(c_T *poly, int degree, c_T *root, int &iter, bool &success)
+__host__ __device__ void cmplx_newton_spec(c_T *poly, int degree, c_T *root, int &iter, bool &success)
 {
     using f_T = typename c_T::f_t;    
 	//Subroutine finds one root of a c_T polynomial
@@ -491,8 +501,8 @@ __device__ void cmplx_newton_spec(c_T *poly, int degree, c_T *root, int &iter, b
 		if (dp == zero) {
 			//problem with zero
 			// dx = (abs(*root) + 1) * expcmplx(c_T(0, FRAC_JUMPS[i% FRAC_JUMP_LEN] * 2 * M_PI));  // just some random numbers is enough
-            // dx = f_T(abs_c(*root) + 1) * c_T(0.626f, 0.212f);        // some random () numbers
-            dx.set( 0.626f, 0.212f );
+            // dx = f_T(abs_c(*root) + 1) * c_T(0.266f, 0.122f);
+            dx.set( 0.266f, 0.122f );
             dx *= ( 1 + abs_c( * root ) );
 		}
 		else {
@@ -505,7 +515,7 @@ __device__ void cmplx_newton_spec(c_T *poly, int degree, c_T *root, int &iter, b
 			return;
 		}
 		if ((i & (FRAC_JUMP_EVERY - 1 ))== 0) { // decide whether to do a jump of modified length (to break cycles)
-			faq.set(0.108f,0.525f);  // some random () numbers
+			faq.set(0.81f,0.552f);
 			newroot = *root - faq * dx;
 		}
 		*root = newroot;
@@ -515,7 +525,7 @@ __device__ void cmplx_newton_spec(c_T *poly, int degree, c_T *root, int &iter, b
 }
 
 template<class c_T>
-__device__ void cmplx_laguerre(c_T *poly, int degree, c_T *root, int &iter, bool &success)
+__host__ __device__ void cmplx_laguerre(c_T *poly, int degree, c_T *root, int &iter, bool &success)
 {
     using f_T = typename c_T::f_t;    
 	//Subroutine finds one root of a c_T polynomial using
@@ -656,8 +666,8 @@ __device__ void cmplx_laguerre(c_T *poly, int degree, c_T *root, int &iter, bool
 
 		if (denom == zero) {
 			// dx = (absroot + 1.0)*expcmplx(c_T(0, FRAC_JUMPS[i % FRAC_JUMP_LEN] * 2 * M_PI));
-			// dx = f_T(abs_c(*root) + 1) * c_T(0.626f, 0.212f);        // some random () numbers
-            dx.set( 0.626f, 0.212f );
+			// dx = f_T(abs_c(*root) + 1) * c_T(0.266f, 0.122f);
+            dx.set( 0.266f, 0.122f );
             dx *= ( 1 + abs_c( * root ) );            
 		}
 		else {
@@ -673,7 +683,7 @@ __device__ void cmplx_laguerre(c_T *poly, int degree, c_T *root, int &iter, bool
 		}
 		if ((i & (FRAC_JUMP_EVERY-1)) == 0) { //decide whether to do a jump of modified length (to break cycles)
 			// faq = FRAC_JUMPS[(i / FRAC_JUMP_EVERY - 1) % FRAC_JUMP_LEN];
-			faq.set(0.108f,0.525f);  // some random () numbers
+			faq.set(0.81f,0.552f);
 			newroot = *root - faq*dx; // do jump of semi-random length
 		}
 		*root = newroot;
@@ -683,7 +693,7 @@ __device__ void cmplx_laguerre(c_T *poly, int degree, c_T *root, int &iter, bool
 }
 
 template< class c_T >
-__device__ void cmplx_laguerre2newton(c_T *poly, int degree, c_T *root, int &iter, bool &success, int starting_mode)
+__host__ __device__ void cmplx_laguerre2newton(c_T *poly, int degree, c_T *root, int &iter, bool &success, int starting_mode)
 {
     using f_T = typename c_T::f_t;
     
@@ -869,8 +879,8 @@ __device__ void cmplx_laguerre2newton(c_T *poly, int degree, c_T *root, int &ite
 				}
 				if (denom == zero) {//test if demoninators are > 0.0 not to divide by zero
 					// dx = (abs(*root) + 1.0) + expcmplx(c_T(0.0, FRAC_JUMPS[i% FRAC_JUMP_LEN] * 2 * M_PI)); //make some random jump
-					// dx = f_T(abs_c(*root) + 1.0) * c_T(0.626f, 0.212f);        // some random () numbers
-                    dx.set( 0.626f, 0.212f );
+					// dx = f_T(abs_c(*root) + 1.0) * c_T(0.266f, 0.122f);
+                    dx.set( 0.266f, 0.122f );
                     dx *= ( 1 + abs_c( * root ) );                    
 				}
 				else {
@@ -889,7 +899,7 @@ __device__ void cmplx_laguerre2newton(c_T *poly, int degree, c_T *root, int &ite
 				}
 				if ((i & (FRAC_JUMP_EVERY-1)) == 0) {//decide whether to do a jump of modified length (to break cycles)
 					// faq = FRAC_JUMPS[((i / FRAC_JUMP_EVERY - 1) % FRAC_JUMP_LEN)];
-					faq.set(0.108f,0.525f);  // some random () numbers
+					faq.set(0.81f,0.552f);
 					newroot = *root - faq * dx; // do jump of some semi-random length (0 < faq < 1)
 				}
 				*root = newroot;
@@ -954,8 +964,8 @@ __device__ void cmplx_laguerre2newton(c_T *poly, int degree, c_T *root, int &ite
 				}
 				if (dp == zero) {//test if denominators are > 0.0 not to divide by zero
 					// dx = (abs(*root) + 1.0) * expcmplx(c_T(0.0, FRAC_JUMPS[i% FRAC_JUMP_LEN] * 2 * M_PI)); //make some random jump
-					// dx = f_T(abs_c(*root) + 1) * c_T(0.626f, 0.212f);        // some random () numbers
-                    dx.set( 0.626f, 0.212f );
+					// dx = f_T(abs_c(*root) + 1) * c_T(0.266f, 0.122f);
+                    dx.set( 0.266f, 0.122f );
                     dx *= ( 1 + abs_c( * root ) );                    
 				}
 				else {
@@ -982,7 +992,7 @@ __device__ void cmplx_laguerre2newton(c_T *poly, int degree, c_T *root, int &ite
 				}
 				if ((i &  (FRAC_JUMP_EVERY-1)) == 0) {// decide whether to do a jump of modified length (to break cycles)
 					// faq = FRAC_JUMPS[(i / FRAC_JUMP_EVERY - 1) % FRAC_JUMP_LEN];
-					faq.set(0.108f,0.525f);  // some random () numbers
+					faq.set(0.81f,0.552f);
 					newroot = *root - faq * dx; //do jump of some semi random lenth (0 < faq < 1)		
 				}
 				*root = newroot;
@@ -1038,8 +1048,8 @@ __device__ void cmplx_laguerre2newton(c_T *poly, int degree, c_T *root, int &ite
 
 				if (dp == zero) {
 					// dx = (abs(*root) + 1.0)*expcmplx(c_T(0.0, 2 * M_PI*FRAC_JUMPS[i % FRAC_JUMP_LEN])); // make a random jump
-					// dx = f_T(abs_c(*root) + 1) * c_T(0.626f, 0.212f);        // some random () numbers
-                    dx.set( 0.626f, 0.212f );
+					// dx = f_T(abs_c(*root) + 1) * c_T(0.266f, 0.122f);
+                    dx.set( 0.266f, 0.122f );
                     dx *= ( 1 + abs_c( * root ) );                    
 				}
 				else {

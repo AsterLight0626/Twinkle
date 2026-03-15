@@ -9,7 +9,10 @@ import numpy as np
 from sysconfig import get_paths as sysconfig_get_paths
 
 python_include = sysconfig_get_paths()['include']
-CUDA_HOME = os.environ.get("CUDA_HOME", "/usr/local/cuda")
+CUDA_HOME = os.environ["CUDA_HOME"]
+# CUDA_HOME = os.environ.get("CUDA_HOME", "/usr/local/cuda")
+# cuda_version = str(12.3)
+
 
 class CUDAExtension(Extension):
     def __init__(self, name, sources, **kwargs):
@@ -29,14 +32,14 @@ class CustomBuildExt(build_ext):
 
             # 使用NVCC进行最终链接（关键修改）
             link_cmd = [
-                '/usr/local/cuda-12.3/bin/nvcc',
+                CUDA_HOME+'/bin/nvcc',
                 '--shared',
                 '-arch=sm_70',
                 '-Xcompiler', '-fPIC',       # 显式传递PIC参数
-                '-Xlinker', '-rpath=/usr/local/cuda-12.3/lib64',
+                '-Xlinker', '-rpath='+CUDA_HOME+'/lib64',
                 '-o', ext_path,
                 *objects,
-                '-L/usr/local/cuda-12.3/lib64',
+                '-L'+CUDA_HOME+'/lib64',
                 '-lcudart',
                 '-lcudadevrt',
                 '-Xcompiler', '-lstdc++'     # 传递C++标准库
@@ -107,7 +110,7 @@ cuda_extension = CUDAExtension(
         os.path.join(CUDA_HOME, 'include'),
         python_include
     ],
-    library_dirs=['/usr/local/cuda-12.3/lib64'],
+    library_dirs=[CUDA_HOME+'/lib64'],
     language='c++'
 )
 # print("NumPy include path:", np.get_include())

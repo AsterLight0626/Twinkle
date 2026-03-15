@@ -222,11 +222,39 @@ void driver_t::return_mag_to( double* mag )
     } 
 }
 
+void driver_t::return_mag_err_to( double* mag, double* err )
+{
+    int n_src_per_stream = (n_srcs_all-1) / vp_sol.size() + 1;  // vp_sol.size = nstream
+    for( auto & p_sol : vp_sol )
+    {
+        p_sol->pool_mag.cp_d2h( * p_dev );
+    }
+    for(int idx=0;idx<n_srcs_all;idx++)
+    {
+        mag[idx] = vp_sol[ idx/n_src_per_stream ]->pool_mag.dat_h[ idx%n_src_per_stream ].mag;
+        err[idx] = vp_sol[ idx/n_src_per_stream ]->pool_mag.dat_h[ idx%n_src_per_stream ].err;
+    } 
+}
+
+void driver_t::return_Ncross_to( int* Ncross )
+{
+    int n_src_per_stream = (n_srcs_all-1) / vp_sol.size() + 1;  // vp_sol.size = nstream
+    for( auto & p_sol : vp_sol )
+    {
+        p_sol->pool_Ncross.cp_d2h( * p_dev );
+    }
+    for(int idx=0;idx<n_srcs_all;idx++)
+    {
+        Ncross[idx] = vp_sol[ idx/n_src_per_stream ]->pool_Ncross.dat_h[ idx%n_src_per_stream ];
+    } 
+}
+
 void driver_t::free(  )
 {
     for( auto & p_sol : vp_sol )    
         p_sol->free( * p_dev );
-
+    // p_dev->sync_all_streams(   );
+    // p_dev->finalize(  );
     return;
 }
 
@@ -241,10 +269,51 @@ void driver_t::run(  )
     return;
 }
 
-void driver_t::runLD( double LD_a )
+void driver_t::run_pt(  )
+{
+    for( auto & p_sol : vp_sol )    
+        p_sol-> run_pt ( *  p_dev );
+    p_dev->sync_all_streams(   );
+    return;
+}
+
+void driver_t::runLD( double LD_a, int* Nuniform )
+{
+
+    for( auto & p_sol : vp_sol )    
+        p_sol-> runLD_beta ( *  p_dev, LD_a, Nuniform );        // runLD_beta 自带 nullptr 的处理
+    p_dev->sync_all_streams(   );
+    return;
+}
+
+void driver_t::runLD1( double LD_a )
 {
     for( auto & p_sol : vp_sol )    
         p_sol-> runLD_A ( *  p_dev, LD_a );
+    p_dev->sync_all_streams(   );
+    return;
+}
+
+void driver_t::runLD2( double LD_a )
+{
+    for( auto & p_sol : vp_sol )    
+        p_sol-> runLD_MaxErr ( *  p_dev, LD_a );
+    p_dev->sync_all_streams(   );
+    return;
+}
+
+void driver_t::runLD_Nuniform( double LD_a, int* Nuniform )
+{
+    for( auto & p_sol : vp_sol )    
+        p_sol-> runLD_MaxErr ( *  p_dev, LD_a, Nuniform );
+    p_dev->sync_all_streams(   );
+    return;
+}
+
+void driver_t::runLD_beta( double LD_a, int* Nuniform )
+{
+    for( auto & p_sol : vp_sol )    
+        p_sol-> runLD_beta ( *  p_dev, LD_a, Nuniform );
     p_dev->sync_all_streams(   );
     return;
 }

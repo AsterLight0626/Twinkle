@@ -38,7 +38,6 @@ struct local_info_t
     __device__ void setup_mem
     ( const char* const dat_sh )
     {
-        // 使用 adap 部分时，后面的部分都没有被使用，这两者可以共存于同一空间，不同时间
         int offset = 0;
 
         this -> shared_info = (shared_info_t < f_T > *) &dat_sh[offset];    // size = 1
@@ -47,6 +46,7 @@ struct local_info_t
         this -> parent_idx = ( int * ) &dat_sh[offset];         // size = n_th, 这部分虽然在adap 里，但是是独立的，不能共用
         offset += sizeof(int) * n_th;
 
+        // 使用 adap 部分时，后面的部分都没有被使用。它们可以共存于同一空间，不同时间
         this -> adap_sum = ( f_T * ) &dat_sh[offset];           // size = n_point_max，与下面的信息共用
         // offset += sizeof(f_T) * n_point_max;
 

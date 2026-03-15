@@ -12,7 +12,7 @@ __host__ source_base_t:: source_base_t(  )
     // n_src = 64*2*2;
     // n_src = 1;
     // n_src = 256;
-    n_src = 1;
+    n_src = 1;          // 在 driver 中调整
 
     // Temporarily hard-coded
     n_point_max = 4096;
@@ -36,6 +36,7 @@ __host__ void source_base_t::init( device_t & f_dev )
     pool_extended   .setup_mem( f_dev, n_src );
     pool_lens_s.setup_mem( f_dev, n_src );
     pool_phi.setup_mem( f_dev, n_src );
+    pool_Ncross.setup_mem( f_dev, n_src);
 
     stream = f_dev.yield_stream(  );
 
@@ -155,6 +156,9 @@ __host__ void source_base_t::free( device_t & f_dev )
     pool_center.free( f_dev );
     pool_margin.free( f_dev );
     pool_extended.free( f_dev );
+    pool_lens_s.free( f_dev );
+    pool_phi.free( f_dev );
+    pool_Ncross.free( f_dev );
     return;
 }
 
@@ -252,7 +256,8 @@ __device__ bool source_base_t::solve_imgs
 
 
 
-__device__ c_t source_base_t::f_zbar
+
+__host__ __device__ c_t source_base_t::f_zbar
 ( const c_t & z, const f_t lens_s ) const
 {
     return -(m1 / (z.conj(  ) + lens_s*m2) + m2 / (z.conj(  ) - lens_s*m1));
@@ -1556,13 +1561,20 @@ __device__ int source_base_t::bisearch_left
 // return bool fail;
 __device__ bool source_base_t::slope_test
 ( src_pt_t < f_t > * pt_here, src_pt_t < f_t > * pt_other,
-const int jj, const int idx_here, bool& Break ) const
+const int jj, const int idx_here, bool& Break, int& Ncross_all, const int bcidx ) const
 {
     Break = false;
     if(pt_here->next_idx[jj] != idx_here)
     {
         return false;
     }
+    // else
+    // {
+    //     if(bcidx==0)
+    //     {
+    //         atomicAdd(&Ncross_all, 1);            
+    //     }
+    // }
 
     c_t posi_phys[2];
     c_t posi_ghost[2];
@@ -1610,7 +1622,7 @@ const int jj, const int idx_here, bool& Break ) const
 ////////////////////////////////////////////////////////////
 //
 
-__device__ void source_base_t::solve_point_approx(  ) const
+__device__ void source_base_t::solve_point_approx( f_t coeff_RelTol ) const
 {
     const int i_src = threadIdx.x + n_th * blockIdx.x;
     if( i_src >= n_src )
@@ -1642,17 +1654,26 @@ __device__ void source_base_t::solve_point_approx(  ) const
         }
     }
 
-    bool is_point_src
-     = (muQC * C_Q < RelTol * muPS)
-    && ghost_test_all( temp_images, phys_tst, zeta, Rho, lens_s )
+    muQC *= C_Q;
+    
+    bool additional_test
+    = ghost_test_all( temp_images, phys_tst, zeta, Rho, lens_s )
     && safe_distance_test(zeta, Rho, lens_s );
+
+    bool is_point_src
+     = (muQC < coeff_RelTol * RelTol * muPS) && additional_test;
 
     if( is_point_src )
     {
-        mag_err.mag = muPS;
-        mag_err.err = muQC;
         ext_info.SolveSucceed = true;       // default: false
     }
+    if( !additional_test )      // 如果没通过额外测试，也就是 ghost_test 或者 safe_distance 失败了
+    {
+        // muQC += coeff_RelTol * RelTol * muPS;     
+        muQC += muPS;           // 多加些误差
+    }
+    mag_err.mag = muPS;
+    mag_err.err = muQC;
 
     return;
 }
@@ -1890,7 +1911,7 @@ __device__ void source_base_t::connect_next_local( local_info_t<f_t>& local_info
 }
 
 
-__device__ void source_base_t::slope_test_local  (local_info_t<f_t>& local_info ) const
+__device__ void source_base_t::slope_test_local  (local_info_t<f_t>& local_info, const int bcidx ) const
 {
     if( local_info.new_pts[ threadIdx.x ].skip ){return;}
     // 基本架构接近 connect_next_local
@@ -1911,7 +1932,7 @@ __device__ void source_base_t::slope_test_local  (local_info_t<f_t>& local_info 
     {
         for(int jj=3;jj<5;jj++)
         {
-            if(slope_test(pt_prev, pt_here, jj, prev_idx, Break))
+            if(slope_test(pt_prev, pt_here, jj, prev_idx, Break, local_info.shared_info->Ncross_all, bcidx))
             {
                 // local_info.shared_info->Break = true;
                 if(!Break)
@@ -1933,7 +1954,7 @@ __device__ void source_base_t::slope_test_local  (local_info_t<f_t>& local_info 
     // loop3 = 1, j012
     for(int jj=0;jj<3;jj++)
     {
-        if(slope_test(pt_here, pt_prev, jj, idx, Break))
+        if(slope_test(pt_here, pt_prev, jj, idx, Break, local_info.shared_info->Ncross_all, bcidx))
         {
             // local_info.shared_info->Break = true;
             if(!Break)
@@ -1955,7 +1976,7 @@ __device__ void source_base_t::slope_test_local  (local_info_t<f_t>& local_info 
     // loop3 = 1, j34
     for(int jj=3;jj<5;jj++)
     {
-        if(slope_test(pt_here, pt_next, jj, idx, Break))
+        if(slope_test(pt_here, pt_next, jj, idx, Break, local_info.shared_info->Ncross_all, bcidx))
         {
             // local_info.shared_info->Break = true;
             if(!Break)
@@ -1978,7 +1999,7 @@ __device__ void source_base_t::slope_test_local  (local_info_t<f_t>& local_info 
     {
         for(int jj=0;jj<3;jj++)
         {
-            if(slope_test(pt_next, pt_here, jj, next_idx, Break))
+            if(slope_test(pt_next, pt_here, jj, next_idx, Break, local_info.shared_info->Ncross_all, bcidx))
             {
                 // local_info.shared_info->Break = true;
                 if(!Break)
@@ -2721,7 +2742,7 @@ __device__ void source_base_t::area_err_local    ( local_info_t<f_t>& local_info
     }
 }
 
-__device__ void source_base_t::sum_area_0_g  ( local_info_t<f_t>& local_info ) const
+__device__ void source_base_t::sum_area_0_g  ( local_info_t<f_t>& local_info, f_t coeff_RelTol ) const
 {
     f_t* deltaS = (f_t*) local_info.deltaS_sum;
     f_t* Err = (f_t*) local_info.Err_sum;
@@ -2862,12 +2883,28 @@ __device__ void source_base_t::sum_area_0_g  ( local_info_t<f_t>& local_info ) c
         }
         // if(idx == 0)
         // {
-        ret_info.mag = fabs(deltaS[0]) / local_info.src_shape.src_area;
-        ret_info.err = Err[0] / local_info.src_shape.src_area;
+
+        // ret_info.mag = fabs(deltaS[0]) / local_info.src_shape.src_area;
+        // ret_info.err = Err[0] / local_info.src_shape.src_area;
+
+
+        if( ((fabs(deltaS[0]) - 3*Err[0]) / local_info.src_shape.src_area) <= sqrt(1+(2/local_info.src_shape.rho)*(2/local_info.src_shape.rho)))
+        {
+            ret_info.mag = fabs(deltaS[0]) / local_info.src_shape.src_area;
+            ret_info.err = Err[0] / local_info.src_shape.src_area;
+        }
+        else        // 如果放大率高于理论上界，且高出的值大于三倍误差，认为此时求解出错，取上一次的结果
+        {
+            ret_info.mag = min(ret_info.mag, sqrt(1+(2/local_info.src_shape.rho)*(2/local_info.src_shape.rho)));
+            ret_info.err = -1;
+            ex_info.SolveSucceed = true;
+            ex_info.Break = true;               // 应该用 Break，但还在测试，所以吧 Break 和 SolveSucceed 都标记了
+        }
+
         ex_info.Area = deltaS[0];
         ex_info.Err_A = Err[0];
 
-        if(Err[0]/fabs(deltaS[0])<=RelTol+RelErrAllowed)
+        if(Err[0]/fabs(deltaS[0])<=coeff_RelTol * RelTol + RelErrAllowed)
         {
             ex_info.SolveSucceed = true;
         }
@@ -2877,7 +2914,7 @@ __device__ void source_base_t::sum_area_0_g  ( local_info_t<f_t>& local_info ) c
     }
 }
 
-__device__ void source_base_t::sum_area_3_local ( local_info_t<f_t>& local_info ) const
+__device__ void source_base_t::sum_area_3_local ( local_info_t<f_t>& local_info, f_t coeff_RelTol ) const
 {
     auto & ex_info = local_info.src_ext;
     auto & ret_info = local_info.src_ret;
@@ -2981,7 +3018,7 @@ __device__ void source_base_t::sum_area_3_local ( local_info_t<f_t>& local_info 
     __syncthreads();
 
 
-    if(abs(deltaS[0]/ex_info.Area) < RelTol*1e-2 )
+    if(abs(deltaS[0]/ex_info.Area) < coeff_RelTol * RelTol * 1e-2 )
     {
         ex_info.SolveSucceed = true;
     }
@@ -2990,18 +3027,32 @@ __device__ void source_base_t::sum_area_3_local ( local_info_t<f_t>& local_info 
     Error = Err[0] + ex_info.Err_A;
     tempS = local_info.src_shape.src_area;
 
-    ret_info.mag = fabs(Area) / tempS;
-    ret_info.err = Error / tempS;
+    // ret_info.mag = fabs(Area) / tempS;
+    // ret_info.err = Error / tempS;
+
+    if( (fabs(Area)- 3 * Error) / tempS <= sqrt(1+(2/local_info.src_shape.rho)*(2/local_info.src_shape.rho)))
+    {
+        ret_info.mag = fabs(Area) / tempS;
+        ret_info.err = Error / tempS;
+    }
+    else        // 如果放大率高于理论上界，且高出的值大于三倍误差，认为此时求解出错，取上一次的结果
+    {
+        ret_info.mag = min(ret_info.mag, sqrt(1+(2/local_info.src_shape.rho)*(2/local_info.src_shape.rho)));
+        ret_info.err = -1;
+        ex_info.SolveSucceed = true;
+        ex_info.Break = true;               // 应该用 Break，但还在测试，所以吧 Break 和 SolveSucceed 都标记了
+    }
+
     ex_info.Area = Area;
     ex_info.Err_A = Error;
 
-    if(Error/fabs(Area)<=RelTol+RelErrAllowed)
+    if(Error/fabs(Area)<= coeff_RelTol * RelTol + RelErrAllowed)
     {
         ex_info.SolveSucceed = true;
     } 
 }
 
-__device__ void source_base_t::adap_set_g ( local_info_t<f_t>& local_info ) const
+__device__ void source_base_t::adap_set_g ( local_info_t<f_t>& local_info, f_t coeff_RelTol ) const
 {
     const int srcidx = blockIdx.x;
     int* ParentIdx = local_info.parent_idx;
@@ -3022,7 +3073,7 @@ __device__ void source_base_t::adap_set_g ( local_info_t<f_t>& local_info ) cons
 
             ErrorWeight[(i*n_th + idx)] /= fabs(local_info.src_ext.Area);          // 使用相对误差
 
-            ErrorWeight[(i*n_th + idx)] = max_f(0,ErrorWeight[(i*n_th + idx)] - RelTol/(batchidx*n_th));        // 如果自己的部分误差小于均值了，那算作过关       
+            ErrorWeight[(i*n_th + idx)] = max_f(0,ErrorWeight[(i*n_th + idx)] - coeff_RelTol * RelTol /(batchidx*n_th));        // 如果自己的部分误差小于均值了，那算作过关       
         }
     }
     // input to shared memory finished
@@ -3141,12 +3192,13 @@ __device__ void source_base_t::adap_set_g ( local_info_t<f_t>& local_info ) cons
 
 //////////////////////////////////////////////////////////////////////
 
-__device__ void source_base_t::solve_extended_uniform( local_info_t<f_t>& local_info, const int i_src ) const
+__device__ void source_base_t::solve_extended_uniform( local_info_t<f_t>& local_info, const int i_src, f_t coeff_RelTol ) const
 {
 
     if( threadIdx.x == 0 )
     {
         local_info.shared_info->Break = local_info.src_ext.Break;
+        local_info.shared_info->Ncross_all = 0;
     }
     __syncthreads();
 
@@ -3157,7 +3209,7 @@ __device__ void source_base_t::solve_extended_uniform( local_info_t<f_t>& local_
         if((local_info.src_ext.SolveSucceed)||(local_info.shared_info->Break)){break;}
 
         if(local_info.batchidx==0){margin_set_local( local_info );}
-        else{adap_set_g( local_info );}
+        else{adap_set_g( local_info, coeff_RelTol );}
         __syncthreads();
         margin_solve_local( local_info );
         __syncthreads();
@@ -3166,6 +3218,8 @@ __device__ void source_base_t::solve_extended_uniform( local_info_t<f_t>& local_
         connect_next_local( local_info );
         __syncthreads();
 
+        // if(pt_here->next_idx[jj] == idx_here)
+
         if( threadIdx.x == 0 )
         {
             local_info.shared_info->Ncross = 0;
@@ -3173,9 +3227,9 @@ __device__ void source_base_t::solve_extended_uniform( local_info_t<f_t>& local_
             local_info.shared_info->Err_cross_global = 0;
         }
         __syncthreads();
-        slope_test_local( local_info );
-        __syncthreads();        
-
+        slope_test_local( local_info, bcidx );
+        __syncthreads();
+        
         if(local_info.shared_info->Ncross > 0  && (!local_info.shared_info->Break))
         {
             {
@@ -3216,7 +3270,7 @@ __device__ void source_base_t::solve_extended_uniform( local_info_t<f_t>& local_
 
         if(local_info.batchidx>=4)
         {
-            sum_area_3_local( local_info );
+            sum_area_3_local( local_info, coeff_RelTol );
             __syncthreads();             
         }
        
@@ -3260,7 +3314,7 @@ __device__ void source_base_t::solve_extended_uniform( local_info_t<f_t>& local_
 
         if(bcidx<4)
         {
-            sum_area_0_g( local_info );
+            sum_area_0_g( local_info, coeff_RelTol );
             __syncthreads();
         }
         
@@ -3270,23 +3324,25 @@ __device__ void source_base_t::solve_extended_uniform( local_info_t<f_t>& local_
     __syncthreads();
     // if(threadIdx.x == 0)                // 最后才输出
     // {
-    //     // local_info.src_ext.SolveSucceed = local_info.shared_info->SolveSucceed;
-    //     local_info.src_ext.Break = local_info.shared_info->Break;
-    //     pool_extended[ i_src ] = local_info.src_ext;
-    //     pool_mag[ i_src ] = local_info.src_ret;
+    //     // // local_info.src_ext.SolveSucceed = local_info.shared_info->SolveSucceed;
+    //     // local_info.src_ext.Break = local_info.shared_info->Break;
+    //     // pool_extended[ i_src ] = local_info.src_ext;
+    //     // pool_mag[ i_src ] = local_info.src_ret;
+    //     printf("(Ncross: %d, mag: %.6f), ",local_info.shared_info->Ncross, local_info.src_ret.mag);
     // }
 
 }
 
 __device__ f_t source_base_t::M0_phi( local_info_t<f_t>& local_info, const int i_src, const f_t phi ) const
 {
+    f_t coeff_RelTol = 1./3.;
     f_t r2 = 1-phi*phi;
     local_info.batchidx = 0;
     local_info.src_ext.SolveSucceed = false;
     local_info.src_ext.Break = false;
     local_info.src_shape.src_area = pool_center[ i_src ].src_area * r2;
     local_info.src_shape.rho = pool_center [ i_src ].rho * sqrt(r2);
-    solve_extended_uniform(local_info, i_src);
+    solve_extended_uniform(local_info, i_src, coeff_RelTol);
 
     return local_info.src_ret.mag;
 }
@@ -3320,6 +3376,25 @@ __host__ void source_base_t::run( device_t & f_dev )
 
     return;
 }
+
+__host__ void source_base_t::run_pt( device_t & f_dev )
+{
+    auto n_bl = ( n_src + n_th - 1 ) / n_th;
+    auto s_sh = 0;
+
+    auto lpar = std::make_tuple
+        ( dim3( n_bl ), dim3( n_th ), s_sh );
+
+    f_dev.launch( point_approximation, lpar, stream, ( * this ) );
+
+    // 这是 host 函数！我忘了，这里是没法访问 pool_extended 的，应该在 Err 上想办法
+    // const int i_src = threadIdx.x + n_th * blockIdx.x;
+    // if( i_src < n_src )
+    //     printf("%d,",pool_extended[i_src].SolveSucceed);
+
+    return;
+}
+
 
 // it has synchronization problems, don't use it
 // __host__ void source_base_t::runLD( device_t & f_dev, double LD_a, int depth )
@@ -3642,5 +3717,789 @@ __host__ void source_base_t::runLD_A( device_t & f_dev, double LD_a, int max_dep
 
     return;
 }
+
+__host__ void source_base_t::runLD_MaxErr( device_t & f_dev, double LD_a, int* Nuniform_out, int max_depth )
+{
+    auto n_bl = ( n_src + n_th - 1 ) / n_th;
+    auto s_sh = 0;
+    auto lpar = std::make_tuple
+        ( dim3( n_bl ), dim3( n_th ), s_sh );
+    f_dev.launch( point_approximation, lpar, stream, ( * this ) );
+    n_bl = n_src;
+    s_sh = sizeof(int)*n_th + 
+    std::max( sizeof(float2_t)*n_point_max, 
+              sizeof(float2_t)   * 8*n_th
+            + sizeof(shared_info_t< float2_t >) * 1 
+            + sizeof(cross_info_t) * n_cross_max * 4
+            + sizeof(src_pt_t< float2_t >) * n_th);
+
+    double RelTolS = RelTol/2;                // 待修改，和 LD_a 相关
+    // float2_t* phi_L = new float2_t[n_src];
+    // float2_t* phi_R = new float2_t[n_src];
+    float2_t* LDInte = new float2_t[n_src];
+    float2_t* M0 = new float2_t[n_src];
+    float2_t* Error_now = new float2_t[n_src];
+    float2_t* lowerbound = new float2_t[n_src];
+    bool* finished = new bool[n_src];
+
+    int* Nuniform = new int[n_src];
+
+
+    // 为每个源创建一个最大堆
+    using ErrorUnit = twinkle::ErrorUnit_t<double>;
+    // std::vector<std::priority_queue<ErrorUnit>> heaps(n_src);
+    std::priority_queue<ErrorUnit>* heaps = new std::priority_queue<ErrorUnit>[n_src];
+    ErrorUnit* EU_buffer = new ErrorUnit[n_src];
+    // std::vector<ErrorUnit> EU_buffer;           // 兼任 L
+    // EU_buffer.reserve(n_src); // 预分配内存
+    ErrorUnit* EU_buffer_R = new ErrorUnit[n_src];
+    // std::vector<ErrorUnit> EU_buffer_R;
+    // EU_buffer_R.reserve(n_src); // 预分配内存
+    ////////////////////////////////////////////////////////////////
+
+    // 初始化：批量计算根节点所有需要计算的 phi 值
+    // 阶段1: 计算 phi=0 和 phi=0.5
+    for(int i_src=0; i_src<n_src; i_src++)
+    {
+        // EU_buffer.emplace_back(0.0, 1.0);
+        EU_buffer[i_src] = ErrorUnit(0.0,1.0);
+        EU_buffer[i_src].depth = 2;
+        EU_buffer[i_src].val_R() = 0.0; // phi=1, Mag(1-phi**2)=0
+        EU_buffer[i_src].Ncross[4] = 0;
+        Nuniform[i_src] = 0;
+    }
+    
+    // 批量计算 phi=0,0.25,0.5,0.75
+    for(int loop_i=0;loop_i<4;loop_i++)
+    {
+        for(int i_src=0; i_src<n_src; i_src++)
+        {
+            pool_phi.dat_h[i_src] = EU_buffer[i_src].phi[loop_i];
+        }
+        f_dev.sync_all_streams();
+        pool_phi.cp_h2d(f_dev);
+        f_dev.sync_all_streams();
+        lpar = std::make_tuple(dim3(n_bl), dim3(n_th), s_sh);
+        f_dev.launch(solve_LD_sh, lpar, stream, (*this));
+        f_dev.sync_all_streams();
+        pool_mag.cp_d2h(f_dev);
+        pool_Ncross.cp_d2h(f_dev);
+        f_dev.sync_all_streams();
+        // 回填 phi=0 结果
+        for(int i_src=0; i_src<n_src; i_src++)
+        {
+            ErrorUnit& eu = EU_buffer[i_src];
+            eu.val[loop_i] = pool_mag.dat_h[i_src].mag * (1.0 - eu.phi[loop_i]*eu.phi[loop_i]); // phi=0
+            eu.Ncross[loop_i] = pool_Ncross.dat_h[i_src];
+            Nuniform[i_src] += 1;
+        }
+    }
+
+
+    // 循环结束后，统一计算并 push 到堆
+    for(int i_src=0; i_src<n_src; i_src++)
+    {
+        ErrorUnit& eu = EU_buffer[i_src];
+        M0[i_src] = eu.val_L();
+        eu.SimpsonC = (eu.R() - eu.L()) / 6.0 * (eu.val_L() + 4.0*eu.val_C() + eu.val_R());
+        eu.GetError();
+        
+        LDInte[i_src] = eu.SimpsonL + eu.SimpsonR;
+        Error_now[i_src] = eu.Error;
+        lowerbound[i_src] = eu.lb;
+        heaps[i_src].push(eu);
+    }
+
+    // printf("val: %.16f,%.16f,%.16f,%.16f,%.16f\n",EU_buffer[960].val[0], EU_buffer[960].val[1], EU_buffer[960].val[2], EU_buffer[960].val[3], EU_buffer[960].val[4]);
+    // printf("Mag1: %.16f\n",(EU_buffer[960].SimpsonL + EU_buffer[960].SimpsonR)*1.5);
+    // printf("Err1: %.16f\n",EU_buffer[960].Error);
+    // printf("Nross: %d,%d,%d,%d,%d\n",EU_buffer[960].Ncross[0],EU_buffer[960].Ncross[1],EU_buffer[960].Ncross[2],EU_buffer[960].Ncross[3],EU_buffer[960].Ncross[4]);
+
+
+    bool all_empty = false;
+    while(!all_empty)
+    {
+        all_empty = true;
+        for(int i_src=0;i_src<n_src;i_src++)
+        {
+            if(Error_now[i_src]/lowerbound[i_src] < RelTolS || Nuniform[i_src]>=1000) // 计算已完成
+            {
+                EU_buffer[i_src] = ErrorUnit(-2.,-1.);
+                EU_buffer_R[i_src] = ErrorUnit(-2.,-1.);
+                finished[i_src] = true;
+            }
+            else
+            {
+                all_empty = false;
+                auto max_error = heaps[i_src].top();
+                heaps[i_src].pop();
+
+                auto [euL, euR] = max_error.Split();        // 每次拆开，两个新的区间的 LC,RC，一共4个点，都要计算
+                EU_buffer[i_src] = euL;
+                EU_buffer_R[i_src] = euR;
+                finished[i_src] = false;
+
+                LDInte[i_src] -= (max_error.SimpsonL+max_error.SimpsonR);
+                Error_now[i_src] -= max_error.Error;
+                lowerbound[i_src] -= max_error.lb;
+            }
+        }
+        
+        // 计算 euL 和 euR 的 Mag
+        for(int iphi: {1,3})
+        {
+            // euL
+            for(int i_src=0; i_src<n_src; i_src++)
+            {
+                pool_phi.dat_h[i_src] = EU_buffer[i_src].phi[iphi];        // Left part, LC
+            }
+            f_dev.sync_all_streams();
+            pool_phi.cp_h2d(f_dev);
+            f_dev.sync_all_streams();
+            lpar = std::make_tuple(dim3(n_bl), dim3(n_th), s_sh);
+            f_dev.launch(solve_LD_sh, lpar, stream, (*this));
+            f_dev.sync_all_streams();
+            pool_mag.cp_d2h(f_dev);
+            pool_Ncross.cp_d2h(f_dev);
+            f_dev.sync_all_streams();
+            // 回填 phi=0 结果
+            for(int i_src=0; i_src<n_src; i_src++)
+            {
+                if(!finished[i_src])
+                {
+                    ErrorUnit& euL = EU_buffer[i_src];
+                    euL.val[iphi] = pool_mag.dat_h[i_src].mag * (1.0 - euL.phi[iphi]*euL.phi[iphi]); // phi=0
+                    euL.Ncross[iphi] = pool_Ncross.dat_h[i_src];
+                    Nuniform[i_src] += 1;
+                }
+            }
+            // euR
+            for(int i_src=0; i_src<n_src; i_src++)
+            {
+                pool_phi.dat_h[i_src] = EU_buffer_R[i_src].phi[iphi];        // Left part, LC
+            }
+            f_dev.sync_all_streams();
+            pool_phi.cp_h2d(f_dev);
+            f_dev.sync_all_streams();
+            lpar = std::make_tuple(dim3(n_bl), dim3(n_th), s_sh);
+            f_dev.launch(solve_LD_sh, lpar, stream, (*this));
+            f_dev.sync_all_streams();
+            pool_mag.cp_d2h(f_dev);
+            pool_Ncross.cp_d2h(f_dev);
+            f_dev.sync_all_streams();
+            // 回填 phi=0 结果
+            for(int i_src=0; i_src<n_src; i_src++)
+            {
+                if(!finished[i_src])
+                {
+                    ErrorUnit& euR = EU_buffer_R[i_src];
+                    euR.val[iphi] = pool_mag.dat_h[i_src].mag * (1.0 - euR.phi[iphi]*euR.phi[iphi]); // phi=0
+                    euR.Ncross[iphi] = pool_Ncross.dat_h[i_src];
+                    Nuniform[i_src] += 1;
+                }
+            }
+        }
+        // 完成 euL，euR 相关计算，push到堆里
+        for(int i_src=0; i_src<n_src; i_src++)
+        {
+            if(!finished[i_src])
+            {
+                ErrorUnit& euL = EU_buffer[i_src];
+                euL.GetError();
+                ErrorUnit& euR = EU_buffer_R[i_src];
+                euR.GetError();
+
+                LDInte[i_src] += (euL.SimpsonL+euL.SimpsonR)+(euR.SimpsonL+euR.SimpsonR);
+                // LDInte[i_src] += (euL.SimpsonC)+(euR.SimpsonC);
+                Error_now[i_src] += euL.Error+euR.Error;
+                lowerbound[i_src] += euL.lb+euR.lb;
+
+                heaps[i_src].push(euL);
+                heaps[i_src].push(euR);
+
+                if(euL.depth>max_depth)    // 超过最大深度，终止
+                {
+                    Error_now[i_src] = 0.;
+                }
+            }
+        }
+
+    }
+
+
+    for(int i_src=0;i_src<n_src;i_src++)
+    {
+        pool_mag.dat_h[ i_src ].mag = ((1-LD_a)*M0[i_src] + LD_a*LDInte[i_src]) / (1-LD_a/3); 
+    }
+    pool_mag.cp_h2d( f_dev );
+    f_dev.sync_all_streams();
+
+
+    if(Nuniform_out)
+    {
+        for(int i_src=0; i_src<n_src; i_src++)
+        {
+            Nuniform_out[i_src] = Nuniform[i_src];
+        }
+    }
+
+    delete[] LDInte;
+    // delete[] phi_L;
+    // delete[] phi_R;
+    delete[] M0;
+    delete[] Error_now;
+    delete[] lowerbound;
+    delete[] finished;
+    delete[] EU_buffer;
+    delete[] EU_buffer_R;
+    delete[] Nuniform;
+
+    return;
+}
+
+__host__ void source_base_t::monotest_single(double val_L, double val_R, double Mag_L, double Mag_R, double phi_self, double& val_self, double& Mag_self)
+{
+    if (val_self > val_L*10. || val_self < val_R*0.1)         // 如果不满足单调性，给这个点插值
+    {
+        Mag_self = ( Mag_L + Mag_R )/2.;
+        val_self = Mag_self * (1 - phi_self*phi_self);
+    }
+
+    // else
+    //     printf("(%.16f,%.16f,%.16f),",val_L, val_self, val_R);
+        
+    return;
+}
+
+__host__ void source_base_t::monotest(twinkle::ErrorUnit_t<double>& eu)
+{
+    monotest_single(eu.val_L(),eu.val_C(),eu.raw_Mag[0],eu.raw_Mag[2], eu.phi[1], eu.val_LC(),eu.raw_Mag[1]);
+    monotest_single(eu.val_C(),eu.val_R(),eu.raw_Mag[2],eu.raw_Mag[4], eu.phi[3], eu.val_RC(),eu.raw_Mag[3]);
+
+    return;
+}
+
+__host__ void source_base_t::caustic_cal(double lens_s, double lens_q, c_t* caustic_points)
+{
+
+    c_t coef[5];
+    // c_t temp_caus[4];
+    image_pt_t<f_t> temp_images[4];
+
+    f_t denom = f_t(1) / (f_t(1) + lens_q);
+    f_t m0 = denom;               // 1/(1+q)
+    f_t m1 = lens_q * denom;            // q/(1+q)
+
+    // 透镜位置 z0 和 z1 (均为实数)
+    f_t A = -lens_s * m1;               // z0
+    f_t B =  lens_s * m0;                // z1
+
+    // 预计算常用量
+    f_t A2 = A * A;
+    f_t B2 = B * B;
+    f_t AB = A * B;
+    f_t A_plus_B = A + B;
+    f_t A2B2 = A2 * B2;
+
+    // // exp(-i psi) 的实部和虚部
+    // f_t cos_psi = std::cos(psi);
+    // f_t sin_psi = std::sin(psi);   // exp(-i psi) = cos_psi - i sin_psi
+
+    // 便于计算的 psi 样本
+    f_t cos_psi = 0.6;
+    f_t sin_psi = 0.8;
+
+    // 四次项系数 (恒为 1)
+    coef[4].re = f_t(1);
+    coef[4].im = f_t(0);
+
+    // 三次项系数: -2(A+B)
+    coef[3].re = f_t(-2) * A_plus_B;
+    coef[3].im = f_t(0);
+
+    // 二次项系数: (A^2 + B^2 + 4AB) - (m0+m1) * exp(-i psi)
+    f_t real_part_2 = A2 + B2 + f_t(4) * AB;
+    f_t sum_m = m0 + m1;
+    coef[2].re = real_part_2 - sum_m * cos_psi;
+    coef[2].im = sum_m * sin_psi;          // 因为 - (m0+m1)(-i sin_psi) = +i (m0+m1) sin_psi
+
+    // 一次项系数: -2AB(A+B) + 2A m1 exp(-i psi) + 2B m0 exp(-i psi)
+    f_t const_term_1 = f_t(-2) * AB * A_plus_B;
+    f_t coeff_E_1 = f_t(2) * (A * m1 + B * m0);
+    coef[1].re = const_term_1 + coeff_E_1 * cos_psi;
+    coef[1].im = - coeff_E_1 * sin_psi;
+
+    // 常数项: A^2 B^2 - m1 A^2 exp(-i psi) - m0 B^2 exp(-i psi)
+    f_t const_term_0 = A2B2;
+    f_t coeff_E_0 = -(m1 * A2 + m0 * B2);   // 合并负号
+    coef[0].re = const_term_0 + coeff_E_0 * cos_psi;
+    coef[0].im = - coeff_E_0 * sin_psi;
+
+
+    bool fail = root_finder::cmplx_roots_gen(temp_images, coef, 4,true, false);
+    for(int caus_i=0;caus_i<4;caus_i++)
+    {
+        caustic_points[caus_i] = temp_images[caus_i].position + f_zbar(temp_images[caus_i].position, lens_s );
+    }
+    if(fail)
+    {
+        caustic_points = nullptr;        
+    }
+    // printf("(%.16f,%.16f)\n",caustic_points[0].re, caustic_points[0].im);
+    // printf("(%.16f,%.16f)\n",caustic_points[1].re, caustic_points[1].im);
+    // printf("(%.16f,%.16f)\n",caustic_points[2].re, caustic_points[2].im);
+    // printf("(%.16f,%.16f)\n",caustic_points[3].re, caustic_points[3].im);
+
+    // printf("coef0: (%.16f,%.16f)\n",coef[0].re, coef[0].im);
+    // printf("coef1: (%.16f,%.16f)\n",coef[1].re, coef[1].im);
+    // printf("coef2: (%.16f,%.16f)\n",coef[2].re, coef[2].im);
+    // printf("coef3: (%.16f,%.16f)\n",coef[3].re, coef[3].im);
+    // printf("coef4: (%.16f,%.16f)\n",coef[4].re, coef[4].im); 
+    
+        
+    return;
+}
+
+
+
+__host__ void source_base_t::hidden_phi(c_t* caustic_pts, const c_t& loc_center, double rho, double* phi_hidden)
+{
+    // phi_hidden 的长度需为 5，前四个空位存数值，最后一个存“有效 phi 的个数”
+    // 由于 lens_s 可能不一样，这里 lens_s 需要分别求解。这个是单次的，开销不算太大
+    
+    if(caustic_pts == nullptr)
+    {
+        phi_hidden[4] = 0;          // [*,*,*,*,0]
+    }
+    else
+    {
+        int i_phi=0;
+        double rho2 = rho*rho;
+        for(int test_i=0;test_i<4;test_i++)
+        {
+            f_t distance2 = (caustic_pts[test_i] - loc_center).norm2( );
+            if(distance2 <= rho2)
+            {
+                phi_hidden[i_phi] = sqrt(1-distance2/rho2);
+                i_phi += 1;
+            }
+        }
+        phi_hidden[4] = i_phi;
+        // printf("%.2f,",phi_hidden[4]);
+    }
+    return;
+}
+
+__host__ void source_base_t::runLD_beta( device_t & f_dev, double LD_a, int* Nuniform_out, int max_depth )
+{
+    auto n_bl = ( n_src + n_th - 1 ) / n_th;
+    auto s_sh = 0;
+    auto lpar = std::make_tuple
+        ( dim3( n_bl ), dim3( n_th ), s_sh );
+    f_dev.launch( point_approximation, lpar, stream, ( * this ) );
+    f_dev.sync_all_streams();
+    pool_mag.cp_d2h(f_dev);         // 先计算一次点源近似
+    // pool_extended.cp_d2h(f_dev);    // 把 SolveSucceed 的信息也拿出来   // 不对，这个不需要，我比较 Mag 和 Err 就行
+    n_bl = n_src;
+    s_sh = sizeof(int)*n_th + 
+    std::max( sizeof(float2_t)*n_point_max, 
+              sizeof(float2_t)   * 8*n_th
+            + sizeof(shared_info_t< float2_t >) * 1 
+            + sizeof(cross_info_t) * n_cross_max * 4
+            + sizeof(src_pt_t< float2_t >) * n_th);
+
+    double RelTolS;                // 待修改，和 LD_a 相关
+    if (LD_a != 0)
+    {
+        RelTolS = min(1., RelTol / LD_a);
+    }
+    else{ RelTolS = 1.; }
+    double coeff_RelTol = 1./3.;
+    int NuniformMax = 512;
+    int NuniformMin = 2;
+    
+
+    float2_t* LDInte = new float2_t[n_src];
+    float2_t* M0 = new float2_t[n_src];
+    float2_t* Error_now = new float2_t[n_src];
+    float2_t* lowerbound = new float2_t[n_src];
+    bool* finished = new bool[n_src];           // 标记 LD 求解是否完成
+    bool* ini_finished = new bool[n_src];          // 2603: 新增，点源近似或 initial test 是否直接通过
+    for(int i_src=0;i_src<n_src;i_src++)
+    {
+        finished[i_src] = false;
+        ini_finished[i_src] = false;
+    }
+
+
+    int* Nuniform = new int[n_src];
+
+
+    // 为每个源创建一个最大堆
+    using ErrorUnit = twinkle::ErrorUnit_t<double>;
+    // std::vector<std::priority_queue<ErrorUnit>> heaps(n_src);
+    std::priority_queue<ErrorUnit>* heaps = new std::priority_queue<ErrorUnit>[n_src];
+    ErrorUnit* EU_buffer = new ErrorUnit[n_src];
+    ErrorUnit* EU_buffer_R = new ErrorUnit[n_src];
+    // std::vector<ErrorUnit> EU_buffer_R;
+    // EU_buffer_R.reserve(n_src); // 预分配内存
+    ////////////////////////////////////////////////////////////////
+
+    for(int i_src=0; i_src<n_src; i_src++)
+    {
+        // EU_buffer.emplace_back(0.0, 1.0);
+        EU_buffer[i_src] = ErrorUnit(0.0,1.0);
+        EU_buffer[i_src].depth = 2;
+        EU_buffer[i_src].val_R() = 0.0; // phi=1, Mag(1-phi**2)=0
+        EU_buffer[i_src].Ncross[4] = 0;
+        EU_buffer[i_src].raw_Mag[4]=pool_mag.dat_h[i_src].mag;
+        // if(i_src==50)
+        // {
+        //     printf("i_src: %d, raw_Mag: %.16f\n",i_src,EU_buffer[i_src].raw_Mag[4]);
+        // }
+        Nuniform[i_src] = 0;
+    }
+    // 如果最外圈点源近似通过，直接返回
+    for(int i_src=0;i_src<n_src;i_src++)
+    {
+        if(pool_mag.dat_h[i_src].err < pool_mag.dat_h[i_src].mag * RelTol      // 这里没有加减，不用 coeff_RelTol
+            && 0 >= NuniformMin)                                               // 点源近似 Nuni = 0，需要检验
+        {
+            ini_finished[i_src] = true;        // 数据就保留在 pool_mag ，后面会自动导出的
+            finished[i_src] = true;         // 标记已完成
+            // printf("%d,(%.8f,%.16f),",i_src,pool_mag.dat_h[i_src].mag, pool_mag.dat_h[i_src].err/pool_mag.dat_h[i_src].mag);
+        }
+    }
+
+    // printf("lens_s: %16f, lens_q: %.16f\n",pool_lens_s.dat_h[ 0 ], lens_q);
+    // 准备 hidden error
+    c_t* caustic_pts = new c_t[5*n_src];
+    f_t* phi_hidden = new f_t[5*n_src];
+    f_t prev_lens_s, prev_lens_q;
+    for(int i_src=0;i_src<n_src;i_src++)
+    {
+        if(!finished[i_src])
+        {
+            c_t* caustic_pts_i = caustic_pts + i_src*5;
+            if(i_src==0)
+            {
+                caustic_cal(pool_lens_s.dat_h[ i_src ], lens_q, caustic_pts_i);
+                prev_lens_s = pool_lens_s.dat_h[ i_src ];
+                prev_lens_q = lens_q;
+            }
+            else
+            {
+                if(pool_lens_s.dat_h[ i_src ] == prev_lens_s && lens_q == prev_lens_q)
+                {
+                    for(int caus_i=0;caus_i<5;caus_i++)
+                    {
+                        caustic_pts_i[caus_i] = caustic_pts[(i_src-1)*5 + caus_i];          // 如果 sq 没变，不用重新算了，直接复制过来
+                    }
+                }
+                else
+                {
+                    caustic_cal(pool_lens_s.dat_h[ i_src ], lens_q, caustic_pts_i);
+                    prev_lens_s = pool_lens_s.dat_h[ i_src ];
+                    prev_lens_q = lens_q;
+                }
+            }
+            f_t* phi_hidden_i = phi_hidden + i_src*5;
+            hidden_phi(caustic_pts_i, pool_center.dat_h [ i_src ].loc_centre, pool_center.dat_h [ i_src ].rho, phi_hidden_i);
+            EU_buffer[i_src].phi_hidden = phi_hidden_i;
+            // printf("i_hidden: %.1f,  ", phi_hidden_i[4]);
+            // printf("phi_hidden: %.4f, ", phi_hidden_i[0]);
+        }
+    }
+
+    // 2603: initial test
+    // 需要 phi=1. 时的点源近似，储存在 raw_mag
+    // 计算 phi=0, 0.5（C 点）
+    for(int iphi : {0, 2})        // 2603: 先算 phi = 0 和 phi =0.5
+    {
+        for(int i_src=0; i_src<n_src; i_src++)
+        {
+            if(!finished[i_src])
+            {
+                pool_phi.dat_h[i_src] = EU_buffer[i_src].phi[iphi];
+            }
+            else
+            {
+                pool_phi.dat_h[i_src] = -1.;        // 如果前面完成了，不再进行 phi 计算
+            } 
+        }
+        f_dev.sync_all_streams();
+        pool_phi.cp_h2d(f_dev);
+        f_dev.sync_all_streams();
+        lpar = std::make_tuple(dim3(n_bl), dim3(n_th), s_sh);
+        f_dev.launch(solve_LD_sh, lpar, stream, (*this));
+        f_dev.sync_all_streams();
+        pool_mag.cp_d2h(f_dev);
+        pool_Ncross.cp_d2h(f_dev);
+        f_dev.sync_all_streams();
+        for(int i_src=0; i_src<n_src; i_src++)
+        {
+            if(!finished[i_src])
+            {
+                ErrorUnit& eu = EU_buffer[i_src];
+                double phi = eu.phi[iphi];
+                double mag = pool_mag.dat_h[i_src].mag;
+                eu.val[iphi] = mag * (1.0 - phi*phi);
+                eu.raw_Mag[iphi] = mag;
+                eu.Ncross[iphi] = pool_Ncross.dat_h[i_src];
+                Nuniform[i_src] += 1;
+            }
+        }
+    }
+    // printf("Mag[0,0.5,1]: [%.16f, %.16f, %.16f]\n",EU_buffer[1].raw_Mag[0],EU_buffer[1].raw_Mag[2],EU_buffer[1].raw_Mag[4]);
+    for(int i_src=0;i_src<n_src;i_src++)
+    {
+        ErrorUnit& eu = EU_buffer[i_src];
+        monotest_single(eu.val_L(),eu.val_R(),eu.raw_Mag[0],eu.raw_Mag[4], eu.phi[2], eu.val_C(),eu.raw_Mag[2]);
+    }
+
+    // 计算 initial error
+    double E1, E2, magL, magC, magR, mag_ini,E_ini;
+    double coeff_ini = 0.1;
+    for(int i_src=0; i_src<n_src; i_src++)
+    {
+        if(!finished[i_src])
+        {
+            ErrorUnit& eu = EU_buffer[i_src];
+            magL = eu.raw_Mag[0];
+            magC = eu.raw_Mag[2];
+            magR = eu.raw_Mag[4];
+            mag_ini = 1./6. * (eu.val_L() + 4*eu.val_C() + eu.val_R());        // 此处区间长度一定是 1.
+            mag_ini = ((1-LD_a)*magL + LD_a*mag_ini) / (1-LD_a/3);
+            E2 = fabs(magL - 2*magC + magR);
+            E1 = fabs(magL - magR);
+            E_ini = (3*E2<E1) ? E1 : E2;    // E1 特大就用 E1 ，E2 特大就用 E2
+            E_ini *= coeff_ini;
+            // 添加 hidden error
+            f_t* phi_hidden_i = phi_hidden + i_src*5;
+            if (E_ini/mag_ini < RelTol * coeff_RelTol
+            && 2 >= NuniformMin             // 此时 Nuniform 一定是 2
+            && eu.Ncross[0] == 0
+            && eu.Ncross[2] == 0
+            && phi_hidden_i[4] ==0)         // 如果有 phi_hidden，必须要更多点计算
+            {
+                finished[i_src] = true;
+                ini_finished[i_src] = true;
+                pool_mag.dat_h[i_src].mag = mag_ini;
+                pool_mag.dat_h[i_src].err = E_ini;
+            }
+            // printf("(%d,%.16f,%.16f),",i_src,mag_ini,E_ini/mag_ini);
+            // printf("(%d,%d),",i_src,finished[i_src]);
+        }
+    }
+    
+    // 计算 phi = 0.25, 0.75
+    for(int iphi: {1,3})
+    {
+        for(int i_src=0; i_src<n_src; i_src++)
+        {
+            if(!finished[i_src])
+            {
+                pool_phi.dat_h[i_src] = EU_buffer[i_src].phi[iphi];
+            }
+            else
+            {
+                pool_phi.dat_h[i_src] = -1.;        // 如果前面完成了，不再进行 phi 计算
+            }            
+        }
+        f_dev.sync_all_streams();
+        pool_phi.cp_h2d(f_dev);
+        f_dev.sync_all_streams();
+        lpar = std::make_tuple(dim3(n_bl), dim3(n_th), s_sh);
+        f_dev.launch(solve_LD_sh, lpar, stream, (*this));
+        f_dev.sync_all_streams();
+        pool_mag.cp_d2h(f_dev);
+        pool_Ncross.cp_d2h(f_dev);
+        f_dev.sync_all_streams();
+        // 回填 phi=0 结果
+        for(int i_src=0; i_src<n_src; i_src++)
+        {
+            if(!finished[i_src])
+            {
+                ErrorUnit& eu = EU_buffer[i_src];
+                eu.val[iphi] = pool_mag.dat_h[i_src].mag * (1.0 - eu.phi[iphi]*eu.phi[iphi]); // phi=0
+                eu.Ncross[iphi] = pool_Ncross.dat_h[i_src];
+                Nuniform[i_src] += 1;                
+            }
+        }
+    }
+    for(int i_src=0;i_src<n_src;i_src++)
+    {
+        ErrorUnit& eu = EU_buffer[i_src];
+        monotest(eu);
+    }
+
+    // 循环结束后，统一计算并 push 到堆
+    for(int i_src=0; i_src<n_src; i_src++)
+    {
+        if(!finished[i_src])
+        {
+            ErrorUnit& eu = EU_buffer[i_src];
+            M0[i_src] = eu.val_L();
+            eu.SimpsonC = (eu.R() - eu.L()) / 6.0 * (eu.val_L() + 4.0*eu.val_C() + eu.val_R());
+            eu.GetError();
+            
+            LDInte[i_src] = eu.SimpsonL + eu.SimpsonR;
+            Error_now[i_src] = eu.Error;
+            lowerbound[i_src] = eu.lb;
+            heaps[i_src].push(eu);
+        }
+    }
+
+    // printf("val: %.16f,%.16f,%.16f,%.16f,%.16f\n",EU_buffer[960].val[0], EU_buffer[960].val[1], EU_buffer[960].val[2], EU_buffer[960].val[3], EU_buffer[960].val[4]);
+    // printf("Mag1: %.16f\n",(EU_buffer[960].SimpsonL + EU_buffer[960].SimpsonR)*1.5);
+    // printf("Err1: %.16f\n",EU_buffer[960].Error);
+    // printf("Nross: %d,%d,%d,%d,%d\n",EU_buffer[960].Ncross[0],EU_buffer[960].Ncross[1],EU_buffer[960].Ncross[2],EU_buffer[960].Ncross[3],EU_buffer[960].Ncross[4]);
+
+
+    bool all_empty = false;
+    while(!all_empty)
+    {
+        all_empty = true;
+        for(int i_src=0;i_src<n_src;i_src++)
+        {
+            if(Error_now[i_src]/lowerbound[i_src] < RelTolS || Nuniform[i_src]>=NuniformMax || ini_finished[i_src]) // 计算已完成
+            {
+                EU_buffer[i_src] = ErrorUnit(-2.,-1.);      // 哦！原来是通过非法 phi 值确保 finished 的 source 不会被计算
+                EU_buffer_R[i_src] = ErrorUnit(-2.,-1.);
+                finished[i_src] = true;
+            }
+            else
+            {
+                all_empty = false;
+                auto max_error = heaps[i_src].top();
+                heaps[i_src].pop();
+
+                auto [euL, euR] = max_error.Split();        // 每次拆开，两个新的区间的 LC,RC，一共4个点，都要计算
+                EU_buffer[i_src] = euL;
+                EU_buffer_R[i_src] = euR;
+                finished[i_src] = false;
+
+                LDInte[i_src] -= (max_error.SimpsonL+max_error.SimpsonR);
+                Error_now[i_src] -= max_error.Error;
+                lowerbound[i_src] -= max_error.lb;
+            }
+        }
+        
+        // 计算 euL 和 euR 的 Mag
+        for(int iphi: {1,3})
+        {
+            // euL
+            for(int i_src=0; i_src<n_src; i_src++)
+            {
+                pool_phi.dat_h[i_src] = EU_buffer[i_src].phi[iphi];        // Left part, LC
+            }
+            f_dev.sync_all_streams();
+            pool_phi.cp_h2d(f_dev);
+            f_dev.sync_all_streams();
+            lpar = std::make_tuple(dim3(n_bl), dim3(n_th), s_sh);
+            f_dev.launch(solve_LD_sh, lpar, stream, (*this));
+            f_dev.sync_all_streams();
+            pool_mag.cp_d2h(f_dev);
+            pool_Ncross.cp_d2h(f_dev);
+            f_dev.sync_all_streams();
+            // 回填 phi=0 结果
+            for(int i_src=0; i_src<n_src; i_src++)
+            {
+                if(!finished[i_src])
+                {
+                    ErrorUnit& euL = EU_buffer[i_src];
+                    euL.val[iphi] = pool_mag.dat_h[i_src].mag * (1.0 - euL.phi[iphi]*euL.phi[iphi]); // phi=0
+                    euL.Ncross[iphi] = pool_Ncross.dat_h[i_src];
+                    Nuniform[i_src] += 1;
+                }
+            }
+            // euR
+            for(int i_src=0; i_src<n_src; i_src++)
+            {
+                pool_phi.dat_h[i_src] = EU_buffer_R[i_src].phi[iphi];        // Left part, LC
+            }
+            f_dev.sync_all_streams();
+            pool_phi.cp_h2d(f_dev);
+            f_dev.sync_all_streams();
+            lpar = std::make_tuple(dim3(n_bl), dim3(n_th), s_sh);
+            f_dev.launch(solve_LD_sh, lpar, stream, (*this));
+            f_dev.sync_all_streams();
+            pool_mag.cp_d2h(f_dev);
+            pool_Ncross.cp_d2h(f_dev);
+            f_dev.sync_all_streams();
+            // 回填 phi=0 结果
+            for(int i_src=0; i_src<n_src; i_src++)
+            {
+                if(!finished[i_src])
+                {
+                    ErrorUnit& euR = EU_buffer_R[i_src];
+                    euR.val[iphi] = pool_mag.dat_h[i_src].mag * (1.0 - euR.phi[iphi]*euR.phi[iphi]); // phi=0
+                    euR.Ncross[iphi] = pool_Ncross.dat_h[i_src];
+                    Nuniform[i_src] += 1;
+                }
+            }
+        }
+        // 完成 euL，euR 相关计算，push到堆里
+        for(int i_src=0; i_src<n_src; i_src++)
+        {
+            if(!finished[i_src])
+            {
+                ErrorUnit& euL = EU_buffer[i_src];
+                monotest(euL);
+                euL.GetError();
+                ErrorUnit& euR = EU_buffer_R[i_src];
+                monotest(euR);
+                euR.GetError();
+
+                LDInte[i_src] += (euL.SimpsonL+euL.SimpsonR)+(euR.SimpsonL+euR.SimpsonR);
+                Error_now[i_src] += euL.Error+euR.Error;
+                lowerbound[i_src] += euL.lb+euR.lb;
+
+                heaps[i_src].push(euL);
+                heaps[i_src].push(euR);
+
+                if(euL.depth>max_depth)    // 超过最大深度，终止
+                {
+                    Error_now[i_src] = 0.;
+                }
+            }
+        }
+
+    }
+
+
+    for(int i_src=0;i_src<n_src;i_src++)
+    {
+        if(ini_finished[i_src] == false)
+            {pool_mag.dat_h[ i_src ].mag = ((1-LD_a)*M0[i_src] + LD_a*LDInte[i_src]) / (1-LD_a/3); }
+    }
+    pool_mag.cp_h2d( f_dev );
+    f_dev.sync_all_streams();
+
+
+    if(Nuniform_out)
+    {
+        for(int i_src=0; i_src<n_src; i_src++)
+        {
+            Nuniform_out[i_src] = Nuniform[i_src];
+        }
+    }
+
+    delete[] LDInte;
+    delete[] M0;
+    delete[] Error_now;
+    delete[] lowerbound;
+    delete[] finished;
+    delete[] ini_finished;
+    delete[] EU_buffer;
+    delete[] EU_buffer_R;
+    delete[] Nuniform;
+    delete[] caustic_pts;
+    delete[] phi_hidden;
+    delete[] heaps;
+
+    return;
+}
+
 
 };                              // namespace twinkle
