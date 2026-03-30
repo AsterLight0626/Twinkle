@@ -17,6 +17,7 @@ If you incorporate Twinkle (or part of Twinkle) in your code, we request specify
 
 We also provide a Python API. In the `./python` directory run `python setup.py build_ext --inplace` to compile Twinkle into the current directory. For usage examples of the Python version, see `./python/test.ipynb`.
 
+We developed a new limb-darkening method. If that is related with your work, please also cite this paper: [Suwei Wang, 2026, under review]
 
 ---
 # 中文
@@ -33,4 +34,4 @@ We also provide a Python API. In the `./python` directory run `python setup.py b
 
 我们也提供了 Python API。在 `./python` 文件夹中使用 `python setup.py build_ext --inplace` 将Twinkle编译到当前路径下。Python版本使用方法见 `./python/test.ipynb`。
 
-
+我们开发了一套新的临边昏暗算法，如果您的工作于此相关，请同时引用这一篇文章：[Suwei Wang, 2026, under review]
