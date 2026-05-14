@@ -38,6 +38,11 @@ __host__ void source_base_t::init( device_t & f_dev )
     pool_phi.setup_mem( f_dev, n_src );
     pool_Ncross.setup_mem( f_dev, n_src);
 
+    // if(astrom)
+    // {
+    pool_astrom_Th.setup_mem( f_dev, n_src);
+    // }
+
     stream = f_dev.yield_stream(  );
 
     // s = ss;
@@ -159,6 +164,12 @@ __host__ void source_base_t::free( device_t & f_dev )
     pool_lens_s.free( f_dev );
     pool_phi.free( f_dev );
     pool_Ncross.free( f_dev );
+
+    // if(astrom)
+    // {
+    pool_astrom_Th.free( f_dev );
+    // }
+
     return;
 }
 
@@ -517,6 +528,10 @@ __device__ void source_base_t::set_skip_info
     }     
     src.error_interval = 0;
     src.area_interval = 0;
+    if(astrom)
+    {
+        src.astromX_interval = 0.;
+    }
     return;
 }
 
@@ -1299,6 +1314,15 @@ __device__ f_t source_base_t::delta_s_1
     return -((z_next.im + z_here.im) * (z_next.re - z_here.re) - (z_next.re + z_here.re) * (z_next.im - z_here.im)) / 4;
 }
 
+__device__ void source_base_t::delta_X_1
+( f_t& real, f_t&imag, const c_t & z_here, const c_t & z_next) const
+{
+    // f_t real, imag;
+    real = 1./8. * (z_next.re+z_here.re)*(z_next.re+z_here.re)*(z_next.im-z_here.im);
+    imag = -1./8. * (z_next.im+z_here.im)*(z_next.im+z_here.im)*(z_next.re-z_here.re);
+    return;
+}
+
 
 __device__ f_t source_base_t::wedge_product
 ( const c_t &z1, const c_t &z2 ) const
@@ -1395,12 +1419,15 @@ __device__ void source_base_t::deltaS_error_image_beta
 __device__ void source_base_t::deltaS_error_parity
 ( f_t * deltaS_out, f_t * deltaS_Err_out, const bool parity,
 const int here_idx, const int other_idx,
-const src_pt_t < f_t > * pt_here, const src_pt_t < f_t > * pt_other)    const
+const src_pt_t < f_t > * pt_here, const src_pt_t < f_t > * pt_other, 
+c_t * astromX_out)    const
 {
     f_t Qother_src, Qhere;
     f_t theta1, theta2, theta3;
     int next_i;
     f_t deltaS_tp, E_1234;
+    // astrometry
+    c_t delta_astromX;
 
     Qhere = (pt_here->Q); 
     Qother_src = (pt_other->Q); 
@@ -1427,20 +1454,37 @@ const src_pt_t < f_t > * pt_here, const src_pt_t < f_t > * pt_other)    const
         {
             deltaS_out[jghost] = 0;
             deltaS_Err_out[jghost] = 0;
+            if(astrom)
+            {
+                astromX_out[jghost] = 0.;
+            }
             continue;
         }
         next_i = pt_here->next_idx[j];
         if(here_idx==next_i)
         {
-            deltaS_error_cross(deltaS_tp, E_1234, j, pt_here->next_j[j], (j>=3), pt_here);      // ghost_direction = bool (j>=3)
+            deltaS_error_cross_beta(deltaS_tp, E_1234, j, pt_here->next_j[j], (j>=3), pt_here);      // ghost_direction = bool (j>=3)
             deltaS_out[j] = deltaS_tp;
             deltaS_Err_out[j] = E_1234;
+            // // ！！需要补充 cross 的 astromX
+            // printf("cross! idx: %d, j: %d\n", threadIdx.x, j);
+            if(astrom)
+            {
+                deltaX_cross( delta_astromX,  j, pt_here->next_j[j], (j>=3), pt_here);   
+                astromX_out[j] = delta_astromX;
+            }
             continue;
         }
-        deltaS_error_image( deltaS_tp, E_1234, j, pt_here, pt_other, theta1, theta2, theta3);
+        deltaS_error_image_beta( deltaS_tp, E_1234, j, pt_here, pt_other, theta1, theta2, theta3);
 
         deltaS_out[j] = deltaS_tp;
-        deltaS_Err_out[j] = E_1234;        
+        deltaS_Err_out[j] = E_1234; \
+        if(astrom)
+        {
+            deltaX_normal( delta_astromX,  j, pt_here, pt_other, theta3);   
+            astromX_out[j] = delta_astromX;
+        }
+
     }
 
     // // parity == 1
@@ -1523,6 +1567,116 @@ const src_pt_t < f_t > * pt_here ) const
     f_t E_4 = fabs((deltaS_p1 - deltaS_p2));
     deltaS = deltaS_t+deltaS_p;
     Error1234 = E_2+E_3+E_4;
+    return;
+}
+
+
+__device__ void source_base_t::deltaX_normal
+( c_t & delta_astromX, const int j,
+    const src_pt_t < f_t > * pt_here, const src_pt_t < f_t > * pt_other,
+    const f_t & theta3) const
+{
+    // c_t delta_astromX_t, delta_astromX_p;
+
+    f_t temp_real, temp_imag;
+
+    c_t zs0,zs1,dzs0,dzs1;
+    f_t wedge0,wedge1;
+    int next_j;
+
+    next_j = pt_here->next_j[j];
+    zs0 = pt_here->images[j].position;
+    zs1 = pt_other->images[next_j].position;
+    wedge0 = pt_here->wedge[j];
+    wedge1 = pt_other->wedge[next_j];
+    dzs0 = pt_here->dz[j];
+    dzs1 = pt_other->dz[next_j];
+
+    delta_X_1(temp_real, temp_imag, zs0,zs1);
+    c_t delta_astromX_t = c_t(temp_real, temp_imag);
+
+    // avgwedge1 = (xi_1 * wedge_i + xi1_1 * wedge_i1) * mi
+    // avgwedge2 = (xi_2 * wedge_i + xi1_2 * wedge_i1) * mi
+    // dx2 = dz_i.imag + dz_i1.imag
+    // d2x2 = dx2**2
+    // dx1 = dz_i.real + dz_i1.real
+    // d2x1 = dx1**2
+
+    temp_real = -(-0.125 * (dzs0.re + dzs1.re)*(dzs0.re + dzs1.re) * (dzs0.im + dzs1.im)  - (zs0.re * wedge0 + zs1.re * wedge1) ) * theta3 / 24.;
+    temp_imag =  (-0.125 * (dzs0.im + dzs1.im)*(dzs0.im + dzs1.im) * (dzs0.re + dzs1.re)  + (zs0.im * wedge0 + zs1.im * wedge1) ) * theta3 / 24.;
+
+    // printf("threadIdx: %d, j: %d, (%.16f, %.16f), (%.16f, %.16f) \n",threadIdx.x, j, temp_real, temp_imag, delta_astromX_t.re,delta_astromX_t.im);
+    // printf("theta3: %.16f, first part: (%.16f), second part: (%.16f)\n", theta3, ((dzs0.re + dzs1.re)*(dzs0.re + dzs1.re) * (dzs0.im + dzs1.im)), (zs0.re * wedge0 + zs1.re * wedge1) );
+
+    c_t delta_astromX_p = c_t(temp_real, temp_imag);
+    // delta_astromX_p = 0.;
+
+    delta_astromX = delta_astromX_t + delta_astromX_p;
+
+    return;
+}
+
+__device__ void source_base_t::deltaX_cross
+( c_t & delta_astromX, const int j0, const int j1, const bool ghost_direction,
+    const src_pt_t < f_t > * pt_here) const
+{
+    f_t temp_real, temp_imag;
+
+    // int next_j;
+    // next_j = pt_here->next_j[j];
+
+    c_t zs[2];
+    c_t dzs[2];
+    f_t wedge[2];
+    // zs[0] connect to zs[1]
+    zs[0] = pt_here->images[j0].position;
+    zs[1] = pt_here->images[j1].position;
+    wedge[0] = pt_here->wedge[j0];
+    wedge[1] = pt_here->wedge[j1];
+    dzs[0] = pt_here->dz[j0];
+    dzs[1] = pt_here->dz[j1];  
+
+    // f_t deltaS_t = delta_s_1(zs[0],zs[1]);
+    f_t theta1 = (zs[1]-zs[0]).abs(  ) / sqrt((dzs[0]*dzs[1]).abs(  ));
+    f_t theta2 = theta1*theta1;
+    f_t theta3 = theta2*theta1;
+    int plus = int(!ghost_direction);
+    int minus = int(ghost_direction);
+
+    delta_X_1(temp_real, temp_imag, zs[0],zs[1]);
+    c_t delta_astromX_t = c_t(temp_real, temp_imag);
+
+    // avgwedge1 = (xi_1 * wedge_i + xi1_1 * wedge_i1) * mi
+    // avgwedge2 = (xi_2 * wedge_i + xi1_2 * wedge_i1) * mi
+    // dx2 = dz_i.imag + dz_i1.imag
+    // d2x2 = dx2**2
+    // dx1 = dz_i.real + dz_i1.real
+    // d2x1 = dx1**2
+
+    // temp_real = -(-0.125 * (dzs[plus].re - dzs[minus].re)*(dzs[plus].re - dzs[minus].re) * (dzs[plus].im - dzs[minus].im)  - (zs[plus].re * wedge[plus] - zs[minus].re * wedge[minus]) ) * theta3 / 24.;
+    // temp_imag =  (-0.125 * (dzs[plus].im - dzs[minus].im)*(dzs[plus].im - dzs[minus].im) * (dzs[plus].re - dzs[minus].re)  + (zs[plus].im * wedge[plus] - zs[minus].im * wedge[minus]) ) * theta3 / 24.;
+
+    temp_real =  ((dzs[plus].re * dzs[plus].re * dzs[plus].im + zs[plus].re * wedge[plus]) - (dzs[minus].re * dzs[minus].re * dzs[minus].im + zs[minus].re * wedge[minus])) * theta3 / 24.;
+    temp_imag = -((dzs[plus].im * dzs[plus].im * dzs[plus].re + zs[plus].im * wedge[plus]) - (dzs[minus].im * dzs[minus].im * dzs[minus].re + zs[minus].im * wedge[minus])) * theta3 / 24.;
+
+
+    // // printf("threadIdx: %d, j: %d, (%.16f, %.16f), (%.16f, %.16f) \n",threadIdx.x, j, temp_real, temp_imag, delta_astromX_t.re,delta_astromX_t.im);
+    // // printf("theta3: %.16f, first part: (%.16f), second part: (%.16f)\n", theta3, ((dzs0.re + dzs1.re)*(dzs0.re + dzs1.re) * (dzs0.im + dzs1.im)), (zs0.re * wedge0 + zs1.re * wedge1) );
+
+    // f_t deltaS_p1 = (wedge[plus] - wedge[minus]) * theta3 /24;
+    // f_t deltaS_p2 = wedge_product((zs[1]-zs[0]) , (dzs[1]+dzs[0])) * theta1 / 12;
+    // f_t deltaS_p = (deltaS_p1 + deltaS_p2) / 2;
+
+    c_t delta_astromX_p = c_t(temp_real, temp_imag);
+    // c_t delta_astromX_p = 0.;
+
+    // printf("j0: %d, j1: %d, zsplus, minus: (%.16f, %.16f), (%.16f, %.16f), delta_astromX_p: (%.16f, %.16f)\n", j0,j1,  zs[plus].re, zs[plus].im, zs[minus].re, zs[minus].im, delta_astromX_p.re/deltaS_p, delta_astromX_p.im/deltaS_p);
+    // f_t part1 = -0.125 * (dzs[plus].re - dzs[minus].re)*(dzs[plus].re - dzs[minus].re) * (dzs[plus].im - dzs[minus].im)* theta3 / 24. / deltaS_p;
+    // f_t part2 = (zs[plus].re * wedge[plus] - zs[minus].re * wedge[minus]) * theta3 / 24. / deltaS_p;
+    // printf("++: %.16f, +-: %.16f, -+: %.16f, --: %.16f\n", part1+part2, part1-part2,-part1+part2, -part1-part2);
+
+    delta_astromX = delta_astromX_t + delta_astromX_p;
+
     return;
 }
 
@@ -1632,7 +1786,13 @@ __device__ void source_base_t::solve_point_approx( f_t coeff_RelTol ) const
     const c_t zeta = src.loc_centre;
     auto  & mag_err = pool_mag [i_src];
     auto  & ext_info = pool_extended [i_src];
-
+    
+    c_t temp_astrom_X = 0.;
+    c_t* ptr_astrom_Th = nullptr;
+    if(astrom)
+    {
+        ptr_astrom_Th = &pool_astrom_Th [i_src];
+    }
     const f_t Rho = src.rho;
 
     img_t temp_images[order-1];
@@ -1649,8 +1809,13 @@ __device__ void source_base_t::solve_point_approx( f_t coeff_RelTol ) const
     {
         if(temp_images[j].physical)
         {
-            muPS += 1/fabs(jacobian( temp_images[j].position, lens_s ));
+            f_t temp_pt_mag = 1/fabs(jacobian( temp_images[j].position, lens_s ));
+            muPS += temp_pt_mag;
             muQC += fabs(mu_qc(temp_images[j].position, lens_s ) * (Rho+1e-3) * (Rho+1e-3));
+            if(astrom)
+            {
+                temp_astrom_X += temp_images[j].position * temp_pt_mag;                
+            }
         }
     }
 
@@ -1675,12 +1840,20 @@ __device__ void source_base_t::solve_point_approx( f_t coeff_RelTol ) const
     mag_err.mag = muPS;
     mag_err.err = muQC;
 
+    if(astrom)
+    {
+        *ptr_astrom_Th = temp_astrom_X / muPS;
+    }
+
+
+
     return;
 }
 
 
 __device__ void source_base_t::init_break_succeed(  ) const
 {
+    
     const int i_src = threadIdx.x + n_th * blockIdx.x;
     if( i_src >= n_src )
         return;
@@ -1698,6 +1871,7 @@ __device__ void source_base_t::init_break_succeed(  ) const
     {
         roots_point[j] = 0;
     }
+    
     return;
 }
 
@@ -2691,6 +2865,10 @@ __device__ void source_base_t::area_err_local    ( local_info_t<f_t>& local_info
     src_pt_t < f_t > * pt_prev;
     src_pt_t < f_t > * pt_next;
 
+    // astrometry
+    c_t astromX_out[5];
+
+
     pt_here = &local_info.new_pts[ threadIdx.x ];
     pt_prev = &local_info.pt_prev;
     pt_next = &local_info.pt_next;
@@ -2703,12 +2881,16 @@ __device__ void source_base_t::area_err_local    ( local_info_t<f_t>& local_info
     {
         // positive
         parity = 0;
-        deltaS_error_parity(deltaS_out, deltaS_Err_out, parity, idx_prev, idx_here, pt_prev, pt_here);
+        deltaS_error_parity(deltaS_out, deltaS_Err_out, parity, idx_prev, idx_here, pt_prev, pt_here, astromX_out);
 
         for(int output_j=3; output_j<5;output_j++)
         {
             pt_prev->deltaS[output_j] = deltaS_out[output_j];
             pt_prev->deltaS_Err[output_j] = deltaS_Err_out[output_j];
+            if(astrom)
+            {
+                pt_prev -> delta_astromX[output_j]= astromX_out[output_j];
+            }
         }
     }
 
@@ -2716,15 +2898,21 @@ __device__ void source_base_t::area_err_local    ( local_info_t<f_t>& local_info
 
     // negative
     parity = 1;                      
-    deltaS_error_parity(deltaS_out, deltaS_Err_out, parity, idx_here, idx_prev, pt_here, pt_prev);                    
+    deltaS_error_parity(deltaS_out, deltaS_Err_out, parity, idx_here, idx_prev, pt_here, pt_prev, astromX_out);                    
     // positive
     parity = 0;
-    deltaS_error_parity(deltaS_out, deltaS_Err_out, parity, idx_here, idx_next, pt_here, pt_next);
+    deltaS_error_parity(deltaS_out, deltaS_Err_out, parity, idx_here, idx_next, pt_here, pt_next, astromX_out);
 
     for(int output_j=0; output_j<5;output_j++)
     {
         pt_here->deltaS[output_j] = deltaS_out[output_j];
         pt_here->deltaS_Err[output_j] = deltaS_Err_out[output_j];
+        if(astrom)
+        {
+            pt_here -> delta_astromX[output_j]= astromX_out[output_j];
+            // printf("threadIdx: %d, j: %d, delta_astromX: %.16f, %.16f\n",threadIdx.x, output_j, astromX_out[output_j].re,astromX_out[output_j].im);
+            // printf("%d, %d, %.16f, %.16f\n",threadIdx.x, output_j, pt_here->images[output_j].position.re, pt_here->images[output_j].position.im);
+        }
     }
 
     // loop3 == 2 /////////////////////
@@ -2732,12 +2920,16 @@ __device__ void source_base_t::area_err_local    ( local_info_t<f_t>& local_info
     {
         // negative
         parity = 1;                        
-        deltaS_error_parity(deltaS_out, deltaS_Err_out, parity, idx_next, idx_here, pt_next, pt_here);
+        deltaS_error_parity(deltaS_out, deltaS_Err_out, parity, idx_next, idx_here, pt_next, pt_here, astromX_out);
 
         for(int output_j=0; output_j<3;output_j++)
         {
             pt_next->deltaS[output_j] = deltaS_out[output_j];
             pt_next->deltaS_Err[output_j] = deltaS_Err_out[output_j];
+            if(astrom)
+            {
+                pt_next -> delta_astromX[output_j]= astromX_out[output_j];
+            }
         }
     }
 }
@@ -2746,6 +2938,7 @@ __device__ void source_base_t::sum_area_0_g  ( local_info_t<f_t>& local_info, f_
 {
     f_t* deltaS = (f_t*) local_info.deltaS_sum;
     f_t* Err = (f_t*) local_info.Err_sum;
+    c_t* astromX = (c_t*) local_info.astromX_sum;
 
     const int batchidx = local_info.batchidx;
     const int idx = threadIdx.x;
@@ -2760,6 +2953,10 @@ __device__ void source_base_t::sum_area_0_g  ( local_info_t<f_t>& local_info, f_
     int pointidx;
     auto & ex_info = local_info.src_ext;
     auto & ret_info = local_info.src_ret;
+    // astrometry
+    c_t temp_astromX;
+    auto & astrom_Th_info = local_info.src_astrom_Th;
+    
     if(local_info.shared_info->Break)
     {
 
@@ -2781,6 +2978,10 @@ __device__ void source_base_t::sum_area_0_g  ( local_info_t<f_t>& local_info, f_
 
         deltaS[idx] = 0;
         Err[idx] = 0;
+        if(astrom)
+        {
+            astromX[idx] = 0.;
+        }
 
         // new update
 
@@ -2791,6 +2992,10 @@ __device__ void source_base_t::sum_area_0_g  ( local_info_t<f_t>& local_info, f_
             {
                 pool_margin[i_src * n_point_max + pointidx].deltaS_Err[j] = local_info.pt_prev.deltaS_Err[j];
                 pool_margin[i_src * n_point_max + pointidx].deltaS[j] = local_info.pt_prev.deltaS[j];
+                if(astrom)
+                {
+                    pool_margin[i_src * n_point_max + pointidx].delta_astromX[j] = local_info.pt_prev.delta_astromX[j];
+                }
             }            
         }
         pointidx = local_info.neighbor3[ 1 ];
@@ -2798,6 +3003,10 @@ __device__ void source_base_t::sum_area_0_g  ( local_info_t<f_t>& local_info, f_
         {
             pool_margin[i_src * n_point_max + pointidx].deltaS_Err[j] = local_info.new_pts[ pointidx - batchidx*n_th ].deltaS_Err[j];
             pool_margin[i_src * n_point_max + pointidx].deltaS[j] = local_info.new_pts[ pointidx - batchidx*n_th ].deltaS[j];
+            if(astrom)
+            {
+                pool_margin[i_src * n_point_max + pointidx].delta_astromX[j] = local_info.new_pts[ pointidx - batchidx*n_th ].delta_astromX[j];
+            }
         }
         pointidx = local_info.neighbor3[ 2 ];
         if(pointidx<batchidx*n_th)
@@ -2806,6 +3015,10 @@ __device__ void source_base_t::sum_area_0_g  ( local_info_t<f_t>& local_info, f_
             {
                 pool_margin[i_src * n_point_max + pointidx].deltaS_Err[j] = local_info.pt_next.deltaS_Err[j];
                 pool_margin[i_src * n_point_max + pointidx].deltaS[j] = local_info.pt_next.deltaS[j];
+                if(astrom)
+                {
+                    pool_margin[i_src * n_point_max + pointidx].delta_astromX[j] = local_info.pt_next.delta_astromX[j];
+                }
             }
         }
    
@@ -2823,6 +3036,7 @@ __device__ void source_base_t::sum_area_0_g  ( local_info_t<f_t>& local_info, f_
             {
                 temp_deltaS = 0;
                 temp_Err = 0;
+                temp_astromX = 0.;
                 if(pointidx < batchidx*n_th)
                 {
                     nextsrc_idx = next_src_idx_g( pointidx , i_src );
@@ -2844,26 +3058,47 @@ __device__ void source_base_t::sum_area_0_g  ( local_info_t<f_t>& local_info, f_
                 {
                     temp_deltaS += pt_pointidx->deltaS[j];
                     temp_Err += pt_pointidx->deltaS_Err[j];
+                    if(astrom)
+                    {
+                        temp_astromX += pt_pointidx->delta_astromX[j];
+                    }
                 }
 
                 for(int j=0;j<3;j++)
                 {
                     temp_deltaS += pt_nextsrc_idx->deltaS[j];
                     temp_Err += pt_nextsrc_idx->deltaS_Err[j];
+                    if(astrom)
+                    {
+                        temp_astromX += pt_nextsrc_idx->delta_astromX[j];
+                    }
                 }
                 pool_margin[i_src * n_point_max + pointidx].error_interval = temp_Err;
                 pool_margin[i_src * n_point_max + pointidx].area_interval = temp_deltaS;
                 deltaS[idx] += temp_deltaS;
                 Err[idx] += temp_Err;
+                if(astrom)
+                {
+                    pool_margin[i_src * n_point_max + pointidx].astromX_interval = temp_astromX;
+                    astromX[idx] += temp_astromX;
+                    // printf("idx_here: %d, idx_next: %d, astromX, %.16f, %.16f\n", pointidx, nextsrc_idx, temp_astromX.re, temp_astromX.im);
+                    // printf("%d, %d, %.16f, %.16f\n", pointidx, nextsrc_idx, temp_astromX.re, temp_astromX.im);
+                }
             }
             else
             {
                 pool_margin[i_src * n_point_max + pointidx].error_interval = 0;
                 pool_margin[i_src * n_point_max + pointidx].area_interval = 0;
+                if(astrom)
+                {
+                    pool_margin[i_src * n_point_max + pointidx].astromX_interval =0.;
+                }
             }
 
 
         }
+
+
 
 
         __syncthreads();
@@ -2876,6 +3111,10 @@ __device__ void source_base_t::sum_area_0_g  ( local_info_t<f_t>& local_info, f_
             {
                 deltaS[idx] += deltaS[idx + sum_length/2];
                 Err[idx] += Err[idx + sum_length/2];
+                if(astrom)
+                {
+                    astromX[idx] += astromX[idx + sum_length/2];
+                }
             }
 
             sum_length *= 2;
@@ -2892,6 +3131,15 @@ __device__ void source_base_t::sum_area_0_g  ( local_info_t<f_t>& local_info, f_
         {
             ret_info.mag = fabs(deltaS[0]) / local_info.src_shape.src_area;
             ret_info.err = Err[0] / local_info.src_shape.src_area;
+            if(astrom)
+            {
+                // printf("astromX[0]: %.16f, %.16f, Area: %.16f\n",astromX[0].re,astromX[0].im, fabs(deltaS[0]));
+                astrom_Th_info = astromX[0] / fabs(deltaS[0]);
+                // if(threadIdx.x==0)
+                // {
+                //     printf("astromX: %.16f, %.16f\n", astromX[0].re, astromX[0].im);
+                // }
+            }
         }
         else        // 如果放大率高于理论上界，且高出的值大于三倍误差，认为此时求解出错，取上一次的结果
         {
@@ -2899,10 +3147,15 @@ __device__ void source_base_t::sum_area_0_g  ( local_info_t<f_t>& local_info, f_
             ret_info.err = -1;
             ex_info.SolveSucceed = true;
             ex_info.Break = true;               // 应该用 Break，但还在测试，所以吧 Break 和 SolveSucceed 都标记了
+            // astrom_Th_info = astrom_Th_info;        // 此时不修改 astromX_info，采用上一次的值。
         }
 
         ex_info.Area = deltaS[0];
         ex_info.Err_A = Err[0];
+        if(astrom)
+        {
+            ex_info.astromX = astromX[0];            
+        }
 
         if(Err[0]/fabs(deltaS[0])<=coeff_RelTol * RelTol + RelErrAllowed)
         {
@@ -2918,6 +3171,8 @@ __device__ void source_base_t::sum_area_3_local ( local_info_t<f_t>& local_info,
 {
     auto & ex_info = local_info.src_ext;
     auto & ret_info = local_info.src_ret;
+    // astrometry
+    auto & astrom_Th_info = local_info.src_astrom_Th;
 
     if((local_info.shared_info->Break))
     {
@@ -2939,11 +3194,19 @@ __device__ void source_base_t::sum_area_3_local ( local_info_t<f_t>& local_info,
     f_t* deltaS = (f_t*) local_info.deltaS_sum;
     f_t* Err = (f_t*) local_info.Err_sum;
 
+    // astrometry
+    c_t temp_astromX;
+    c_t* astromX = (c_t*) local_info.astromX_sum;
+
 
     for(int loop2=0;loop2<2;loop2++)
     {
         deltaS[ threadIdx.x + loop2*n_th] = 0;
-        Err[ threadIdx.x + loop2*n_th] = 0;            
+        Err[ threadIdx.x + loop2*n_th] = 0;
+        if(astrom)
+        {
+            astromX[ threadIdx.x + loop2*n_th] = 0.;
+        }
     }
 
     if(!local_info.new_pts[ threadIdx.x ].skip)
@@ -2961,41 +3224,82 @@ __device__ void source_base_t::sum_area_3_local ( local_info_t<f_t>& local_info,
         // loop2 = 0 /////////////////////////////
         f_t old_err = pt_prev->error_interval;
         f_t old_area = pt_prev->area_interval;
+        c_t old_astromX = pt_prev->astromX_interval;
+        // printf("init: %d, %.16f,%.16f\n",idx_list[0], old_astromX.re, old_astromX.im);
         if(idx_list[0]< batchidx*n_th)
         {
             for(int j=3;j<5;j++)
             {
                 deltaS[ threadIdx.x ] += pt_prev->deltaS[j];
                 Err[ threadIdx.x ] += pt_prev->deltaS_Err[j];
+                if(astrom)
+                {
+                    astromX[ threadIdx.x ] += pt_prev->delta_astromX[j];
+                }
             }
             for(int j=0;j<3;j++)
             {
                 deltaS[ threadIdx.x ] += pt_here->deltaS[j];
                 Err[ threadIdx.x ] += pt_here->deltaS_Err[j]; 
+                if(astrom)
+                {
+                    astromX[ threadIdx.x ] += pt_here->delta_astromX[j];
+                }
             }
             pt_prev->error_interval = Err[ threadIdx.x ];
             pt_prev->area_interval = deltaS[ threadIdx.x ];
             Err[ threadIdx.x ] -= old_err;
             deltaS[ threadIdx.x ] -= old_area;
+            if(astrom)
+            {
+                pt_prev->astromX_interval = astromX[ threadIdx.x ];
+                astromX[ threadIdx.x ] -= old_astromX;
+                // printf("old: %d, %d, %.16f,%.16f\n",idx_list[0], idx_list[1], old_astromX.re, old_astromX.im);
+                // printf("%d, %d, %.16f, %.16f\n", idx_list[0], idx_list[1], pt_prev->astromX_interval.re, pt_prev->astromX_interval.im);
+                // printf("%d, %d, %.16f, %.16f\n", idx_list[0], idx_list[1], astromX[ threadIdx.x ].re, astromX[ threadIdx.x ].im);
+
+                // printf("astromX[ %d ]: %.16f, %.16f,   old_astromX: %.16f, %.16f, old_area_err: %.16f, %.16f, idx_prev: %d, %d,%d\n", threadIdx.x, astromX[ threadIdx.x ].re, astromX[ threadIdx.x ].im, old_astromX.re, old_astromX.im, old_area, old_err, idx_list[0], idx_list[1], idx_list[2]);
+            }
         }
         // loop2 = 1 /////////////////////////////
         for(int j=3;j<5;j++)
         {
             deltaS[ threadIdx.x + n_th] += pt_here->deltaS[j];
             Err[ threadIdx.x + n_th] += pt_here->deltaS_Err[j];
+            if(astrom)
+            {
+                astromX[ threadIdx.x + n_th] += pt_here->delta_astromX[j];
+            }
         }
         for(int j=0;j<3;j++)
         {
             deltaS[ threadIdx.x + n_th] += pt_next->deltaS[j];
-            Err[ threadIdx.x + n_th] += pt_next->deltaS_Err[j];    
+            Err[ threadIdx.x + n_th] += pt_next->deltaS_Err[j];
+            if(astrom)
+            {
+                astromX[ threadIdx.x + n_th] += pt_next->delta_astromX[j];
+            }
         }
         pt_here->error_interval = Err[ threadIdx.x + n_th ];
         pt_here->area_interval = deltaS[ threadIdx.x + n_th ];
+        if(astrom)
+        {
+            pt_here->astromX_interval = astromX[ threadIdx.x + n_th ];
+            // printf("%d, %d, %.16f, %.16f\n", idx_list[1], idx_list[2], pt_here->astromX_interval.re, pt_here->astromX_interval.im);
+
+            // printf("astromX_interval_here[%d]: %.16f, %.16f\n", idx_list[1], astromX[ threadIdx.x + n_th ].re, astromX[ threadIdx.x + n_th ].im);
+        }
     }
 
     // 后半加到前面  
     deltaS[ threadIdx.x ] += deltaS[ threadIdx.x + n_th ];
     Err[ threadIdx.x ] += Err[ threadIdx.x + n_th ];
+    if(astrom)
+    {
+        astromX[ threadIdx.x ]  += astromX[ threadIdx.x + n_th ];
+
+        // printf("astromX[ %d ]: %.16f, %.16f, deltaS, err: %.16f, %.16f \n", threadIdx.x, astromX[ threadIdx.x ].re, astromX[ threadIdx.x ].im, deltaS[ threadIdx.x ], Err[ threadIdx.x ]);
+    }
     __syncthreads();
  
 
@@ -3005,16 +3309,21 @@ __device__ void source_base_t::sum_area_3_local ( local_info_t<f_t>& local_info,
         {
             deltaS[ threadIdx.x ] += deltaS[ threadIdx.x + sum_length/2];
             Err[ threadIdx.x ] += Err[ threadIdx.x + sum_length/2];
-
+            if(astrom)
+            {
+                astromX[ threadIdx.x ]  += astromX[ threadIdx.x + sum_length/2];
+            }
         }
         sum_length *= 2;
         __syncthreads();
     }
 
 
-    // 对 global 修改 cross 并产生面积变化时，更改这里：
-    deltaS[0] += local_info.shared_info->deltaS_cross_global;
-    Err[0] += local_info.shared_info->Err_cross_global;
+    // // 对 global 修改 cross 并产生面积变化时，更改这里：
+    // deltaS[0] += local_info.shared_info->deltaS_cross_global;
+    // Err[0] += local_info.shared_info->Err_cross_global;
+    // // 疑似废弃，未增加 astrometry 部分
+
     __syncthreads();
 
 
@@ -3026,6 +3335,14 @@ __device__ void source_base_t::sum_area_3_local ( local_info_t<f_t>& local_info,
     Area = deltaS[0] + ex_info.Area;
     Error = Err[0] + ex_info.Err_A;
     tempS = local_info.src_shape.src_area;
+    if(astrom)
+    {
+        temp_astromX = astromX[0] + ex_info.astromX;
+        // if(threadIdx.x==0)
+        // {
+        //     printf("temp_astromX: %.16f, %.16f, astromX[0]: %.16f, %.16f, ex_info.astromX: %.16f, %.16f  \n", temp_astromX.re, temp_astromX.im, astromX[0].re, astromX[0].im, ex_info.astromX.re, ex_info.astromX.im);
+        // }
+    }
 
     // ret_info.mag = fabs(Area) / tempS;
     // ret_info.err = Error / tempS;
@@ -3034,6 +3351,10 @@ __device__ void source_base_t::sum_area_3_local ( local_info_t<f_t>& local_info,
     {
         ret_info.mag = fabs(Area) / tempS;
         ret_info.err = Error / tempS;
+        if(astrom)
+        {
+            astrom_Th_info = temp_astromX / Area;
+        }
     }
     else        // 如果放大率高于理论上界，且高出的值大于三倍误差，认为此时求解出错，取上一次的结果
     {
@@ -3041,10 +3362,16 @@ __device__ void source_base_t::sum_area_3_local ( local_info_t<f_t>& local_info,
         ret_info.err = -1;
         ex_info.SolveSucceed = true;
         ex_info.Break = true;               // 应该用 Break，但还在测试，所以吧 Break 和 SolveSucceed 都标记了
+        // astrom_Th_info = astrom_Th_info;        // 此时不修改 astromX_info，采用上一次的值。
     }
 
     ex_info.Area = Area;
     ex_info.Err_A = Error;
+    if(astrom)
+    {
+        ex_info.astromX = temp_astromX;        
+    }
+
 
     if(Error/fabs(Area)<= coeff_RelTol * RelTol + RelErrAllowed)
     {
@@ -3204,7 +3531,7 @@ __device__ void source_base_t::solve_extended_uniform( local_info_t<f_t>& local_
 
     // calculation
     for(int bcidx=0;bcidx < (n_point_max / n_th) ;bcidx++)
-    // for(int bcidx=0;bcidx < 6 ;bcidx++)
+    // for(int bcidx=0;bcidx < 1 ;bcidx++)
     {
         if((local_info.src_ext.SolveSucceed)||(local_info.shared_info->Break)){break;}
 
@@ -3289,6 +3616,7 @@ __device__ void source_base_t::solve_extended_uniform( local_info_t<f_t>& local_
                 }
                 pool_margin[i_src * n_point_max + local_info.neighbor3[0]].area_interval = local_info.pt_prev.area_interval;
                 pool_margin[i_src * n_point_max + local_info.neighbor3[0]].error_interval = local_info.pt_prev.error_interval;
+                pool_margin[i_src * n_point_max + local_info.neighbor3[0]].astromX_interval = local_info.pt_prev.astromX_interval;
                 // pool_margin[i_src * n_point_max + local_info.neighbor3[0]].next_src_idx = local_info.pt_prev.next_src_idx;       // adap 里面已经把 global 的信息改好了
             }
             pool_margin[i_src * n_point_max + local_info.neighbor3[1]] = local_info.new_pts[ threadIdx.x ];
@@ -3490,492 +3818,514 @@ __host__ void source_base_t::run_pt( device_t & f_dev )
 //     return;
 // }
 
-__host__ void source_base_t::runLD_A( device_t & f_dev, double LD_a, int max_depth )
-{
-    auto n_bl = ( n_src + n_th - 1 ) / n_th;
-    auto s_sh = 0;
-    auto lpar = std::make_tuple
-        ( dim3( n_bl ), dim3( n_th ), s_sh );
-    f_dev.launch( point_approximation, lpar, stream, ( * this ) );
-    n_bl = n_src;
-    s_sh = sizeof(int)*n_th + 
-    std::max( sizeof(float2_t)*n_point_max, 
-              sizeof(float2_t)   * 8*n_th
-            + sizeof(shared_info_t< float2_t >) * 1 
-            + sizeof(cross_info_t) * n_cross_max * 4
-            + sizeof(src_pt_t< float2_t >) * n_th);
+// __host__ void source_base_t::runLD_A( device_t & f_dev, double LD_a, int max_depth )
+// {
+//     auto n_bl = ( n_src + n_th - 1 ) / n_th;
+//     auto s_sh = 0;
+//     auto lpar = std::make_tuple
+//         ( dim3( n_bl ), dim3( n_th ), s_sh );
+//     f_dev.launch( point_approximation, lpar, stream, ( * this ) );
+//     n_bl = n_src;
+//     s_sh = sizeof(int)*n_th + 
+//     std::max( sizeof(float2_t)*n_point_max, 
+//               sizeof(float2_t)   * 8*n_th
+//             + sizeof(shared_info_t< float2_t >) * 1 
+//             + sizeof(cross_info_t) * n_cross_max * 4
+//             + sizeof(src_pt_t< float2_t >) * n_th);
 
-    double RelTolS = RelTol;
-    float2_t* phi_L = new float2_t[n_src];
-    float2_t* phi_R = new float2_t[n_src];
-    float2_t* LDInte = new float2_t[n_src];
+//     double RelTolS = RelTol;
+//     float2_t* phi_L = new float2_t[n_src];
+//     float2_t* phi_R = new float2_t[n_src];
+//     float2_t* LDInte = new float2_t[n_src];
 
-    // 为每个源创建一个栈
-    std::stack<double*>* stacks = new std::stack<double*>[n_src];
-    std::map<double, double>* memos = new std::map<double, double>[n_src];
+//     // 为每个源创建一个栈
+//     std::stack<double*>* stacks = new std::stack<double*>[n_src];
+//     std::map<double, double>* memos = new std::map<double, double>[n_src];
     
-    // 初始化 memo for phi = [0,0.5,0.25,0.75,1], 这是至少进行的计算量（4倍）
-    // for(float2_t phi : {0.0, 0.5, 0.25, 0.75})
-    // for(float2_t phi : {0.0, 0.5})
-    for(float2_t phi=0; phi<=0.5;phi+=0.5)
-    {
-        // printf("phi: %.6f\n",phi);
-        for(int i_src=0;i_src<n_src;i_src++)
-        {
-            phi_L[i_src] = phi;
-            pool_phi.dat_h[ i_src ] = phi_L[i_src];
-        }
-        f_dev.sync_all_streams();
-        pool_phi.cp_h2d( f_dev );
-        f_dev.sync_all_streams();
-        lpar = std::make_tuple
-            ( dim3( n_bl ), dim3( n_th ), s_sh );
-        f_dev.launch( solve_LD_sh, lpar, stream, ( * this ) );
-        f_dev.sync_all_streams();
-        pool_mag.cp_d2h( f_dev );
-        f_dev.sync_all_streams();
-        for(int i_src=0;i_src<n_src;i_src++)
-        {
-            memos[i_src][phi_L[i_src]] = pool_mag.dat_h[ i_src ].mag * (1-phi_L[i_src]*phi_L[i_src]);
-        }
-    }
-    for(int i_src=0;i_src<n_src;i_src++)
-    {
-        memos[i_src][1] = 0.;       // phi = 1 时，M0r2 = 0
-    }
+//     // 初始化 memo for phi = [0,0.5,0.25,0.75,1], 这是至少进行的计算量（4倍）
+//     // for(float2_t phi : {0.0, 0.5, 0.25, 0.75})
+//     // for(float2_t phi : {0.0, 0.5})
+//     for(float2_t phi=0; phi<=0.5;phi+=0.5)
+//     {
+//         // printf("phi: %.6f\n",phi);
+//         for(int i_src=0;i_src<n_src;i_src++)
+//         {
+//             phi_L[i_src] = phi;
+//             pool_phi.dat_h[ i_src ] = phi_L[i_src];
+//         }
+//         f_dev.sync_all_streams();
+//         pool_phi.cp_h2d( f_dev );
+//         f_dev.sync_all_streams();
+//         lpar = std::make_tuple
+//             ( dim3( n_bl ), dim3( n_th ), s_sh );
+//         f_dev.launch( solve_LD_sh, lpar, stream, ( * this ) );
+//         f_dev.sync_all_streams();
+//         pool_mag.cp_d2h( f_dev );
+//         f_dev.sync_all_streams();
+//         for(int i_src=0;i_src<n_src;i_src++)
+//         {
+//             memos[i_src][phi_L[i_src]] = pool_mag.dat_h[ i_src ].mag * (1-phi_L[i_src]*phi_L[i_src]);
+//         }
+//     }
+//     for(int i_src=0;i_src<n_src;i_src++)
+//     {
+//         memos[i_src][1] = 0.;       // phi = 1 时，M0r2 = 0
+//     }
 
-    // 初始化每个栈
-    for (int i_src = 0; i_src < n_src; i_src++) {
-        double a = 0.;
-        double b = 1.;
+//     // 初始化每个栈
+//     for (int i_src = 0; i_src < n_src; i_src++) {
+//         double a = 0.;
+//         double b = 1.;
         
-        double initial_whole = (memos[i_src][0] + 4*memos[i_src][0.5] + memos[i_src][1]) / 6. * (b-a) ;
-        double* initial_params = new double[5];
-        initial_params[0] = a;
-        initial_params[1] = b;
-        initial_params[2] = RelTolS*initial_whole;
-        initial_params[3] = initial_whole;
-        initial_params[4] = 0.0;  // depth
+//         double initial_whole = (memos[i_src][0] + 4*memos[i_src][0.5] + memos[i_src][1]) / 6. * (b-a) ;
+//         double* initial_params = new double[5];
+//         initial_params[0] = a;
+//         initial_params[1] = b;
+//         initial_params[2] = RelTolS*initial_whole;
+//         initial_params[3] = initial_whole;
+//         initial_params[4] = 0.0;  // depth
         
-        stacks[i_src].push(initial_params);
-        LDInte[i_src] = 0.0;  // 初始化结果，这里需要是0，方便与后面统一
+//         stacks[i_src].push(initial_params);
+//         LDInte[i_src] = 0.0;  // 初始化结果，这里需要是0，方便与后面统一
 
-    }
+//     }
 
-    bool all_empty = false;
-    while(!all_empty)
-    {
-        all_empty = true;
-        for(int i_src=0;i_src<n_src;i_src++)
-        {
-            if(!stacks[i_src].empty())
-            {
-                all_empty = false;
-                double* params = stacks[i_src].top();
-                double a = params[0];
-                double b = params[1];
-                // double eps = params[2];      // not used now
-                double whole = params[3];
-                double depth_value = params[4]; // 注意：深度原本是整数，但我们存储为double
-                int depth = static_cast<int>(depth_value);
-                double c = (a + b) / 2.0;
-                // if(i_src==15)
-                // {
-                //     printf("a: %.16f, b: %.16f, eps: %.16f, whole: %.16f, depth: %d\n",a,b,params[2],whole,depth);
-                // }
-                // 检查深度限制
-                if (depth >= max_depth) {
-                    LDInte[i_src] += whole;
-                    phi_L[i_src] = -1;              // 标记跳过计算
-                    phi_R[i_src] = -1;
-                    // printf("over deep!, i_src=%d, LDInte = %.16f\n", i_src, LDInte[i_src]);
-                    continue;
-                }
+//     bool all_empty = false;
+//     while(!all_empty)
+//     {
+//         all_empty = true;
+//         for(int i_src=0;i_src<n_src;i_src++)
+//         {
+//             if(!stacks[i_src].empty())
+//             {
+//                 all_empty = false;
+//                 double* params = stacks[i_src].top();
+//                 double a = params[0];
+//                 double b = params[1];
+//                 // double eps = params[2];      // not used now
+//                 double whole = params[3];
+//                 double depth_value = params[4]; // 注意：深度原本是整数，但我们存储为double
+//                 int depth = static_cast<int>(depth_value);
+//                 double c = (a + b) / 2.0;
+//                 // if(i_src==15)
+//                 // {
+//                 //     printf("a: %.16f, b: %.16f, eps: %.16f, whole: %.16f, depth: %d\n",a,b,params[2],whole,depth);
+//                 // }
+//                 // 检查深度限制
+//                 if (depth >= max_depth) {
+//                     LDInte[i_src] += whole;
+//                     phi_L[i_src] = -1;              // 标记跳过计算
+//                     phi_R[i_src] = -1;
+//                     // printf("over deep!, i_src=%d, LDInte = %.16f\n", i_src, LDInte[i_src]);
+//                     continue;
+//                 }
 
-                phi_L[i_src] = (a+c) / 2.;
-                phi_R[i_src] = (c+b) / 2.;
-            }
-            else        // 空栈
-            {
-                phi_L[i_src] = -1;
-                phi_R[i_src] = -1;
-            }
-        }
-
-
-        // // 计算左右半区间的Simpson值
-        // double left = simpson(f, memos[i], a, c);
-        // double right = simpson(f, memos[i], c, b);
-        // 左区间中点
-        for(int i_src=0;i_src<n_src;i_src++)
-        {
-            pool_phi.dat_h[ i_src ] = phi_L[i_src];
-        }
-        f_dev.sync_all_streams();
-        pool_phi.cp_h2d( f_dev );
-        f_dev.sync_all_streams();
-        lpar = std::make_tuple
-            ( dim3( n_bl ), dim3( n_th ), s_sh );
-        f_dev.launch( solve_LD_sh, lpar, stream, ( * this ) );
-        f_dev.sync_all_streams();
-        pool_mag.cp_d2h( f_dev );
-        f_dev.sync_all_streams();
-        for(int i_src=0;i_src<n_src;i_src++)
-        {
-            memos[i_src][phi_L[i_src]] = pool_mag.dat_h[ i_src ].mag * (1-phi_L[i_src]*phi_L[i_src]);
-        }
-        // 右区间中点
-        for(int i_src=0;i_src<n_src;i_src++)
-        {
-            pool_phi.dat_h[ i_src ] = phi_R[i_src];
-        }
-        f_dev.sync_all_streams();
-        pool_phi.cp_h2d( f_dev );
-        f_dev.sync_all_streams();
-        lpar = std::make_tuple
-            ( dim3( n_bl ), dim3( n_th ), s_sh );
-        f_dev.launch( solve_LD_sh, lpar, stream, ( * this ) );
-        f_dev.sync_all_streams();
-        pool_mag.cp_d2h( f_dev );
-        f_dev.sync_all_streams();
-        for(int i_src=0;i_src<n_src;i_src++)
-        {
-            memos[i_src][phi_R[i_src]] = pool_mag.dat_h[ i_src ].mag * (1-phi_R[i_src]*phi_R[i_src]);       // 对于 phi-1缺省值，这个值是0
-        }
-
-        // 继续计算积分
-        for(int i_src=0;i_src<n_src;i_src++)
-        {
-            if(!stacks[i_src].empty())
-            {
-                double* params = stacks[i_src].top();
-                double a = params[0];
-                double b = params[1];
-                double eps = params[2];
-                double whole = params[3];
-                double depth_value = params[4]; // 注意：深度原本是整数，但我们存储为double
-                int depth = static_cast<int>(depth_value);
-                double c = (a + b) / 2.0;
-                delete[] params;
-
-                stacks[i_src].pop();
-
-                if (depth >= max_depth) 
-                {
-                    continue;
-                }
-                double left  = (memos[i_src][a] + 4*memos[i_src][phi_L[i_src]] + memos[i_src][c]) / 6. * (c-a);
-                double right = (memos[i_src][c] + 4*memos[i_src][phi_R[i_src]] + memos[i_src][b]) / 6. * (b-c);
+//                 phi_L[i_src] = (a+c) / 2.;
+//                 phi_R[i_src] = (c+b) / 2.;
+//             }
+//             else        // 空栈
+//             {
+//                 phi_L[i_src] = -1;
+//                 phi_R[i_src] = -1;
+//             }
+//         }
 
 
-                if (std::abs(left + right - whole) <= eps && depth > 1) {
-                    // 满足精度要求，累加结果
-                    LDInte[i_src] += left + right + (left + right - whole) / 15.;       // 15 from Richardson extrapolation
-                }
-                else {
-                    // 不满足精度要求，将两个子区间压入栈
-                    // 深度增加1
-                    // 左子区间参数
-                    double* left_params = new double[5];
-                    left_params[0] = a;
-                    left_params[1] = c;
-                    left_params[2] = eps / 2.0;
-                    left_params[3] = left;
-                    left_params[4] = static_cast<double>(depth + 1);
-                    stacks[i_src].push(left_params);
+//         // // 计算左右半区间的Simpson值
+//         // double left = simpson(f, memos[i], a, c);
+//         // double right = simpson(f, memos[i], c, b);
+//         // 左区间中点
+//         for(int i_src=0;i_src<n_src;i_src++)
+//         {
+//             pool_phi.dat_h[ i_src ] = phi_L[i_src];
+//         }
+//         f_dev.sync_all_streams();
+//         pool_phi.cp_h2d( f_dev );
+//         f_dev.sync_all_streams();
+//         lpar = std::make_tuple
+//             ( dim3( n_bl ), dim3( n_th ), s_sh );
+//         f_dev.launch( solve_LD_sh, lpar, stream, ( * this ) );
+//         f_dev.sync_all_streams();
+//         pool_mag.cp_d2h( f_dev );
+//         f_dev.sync_all_streams();
+//         for(int i_src=0;i_src<n_src;i_src++)
+//         {
+//             memos[i_src][phi_L[i_src]] = pool_mag.dat_h[ i_src ].mag * (1-phi_L[i_src]*phi_L[i_src]);
+//         }
+//         // 右区间中点
+//         for(int i_src=0;i_src<n_src;i_src++)
+//         {
+//             pool_phi.dat_h[ i_src ] = phi_R[i_src];
+//         }
+//         f_dev.sync_all_streams();
+//         pool_phi.cp_h2d( f_dev );
+//         f_dev.sync_all_streams();
+//         lpar = std::make_tuple
+//             ( dim3( n_bl ), dim3( n_th ), s_sh );
+//         f_dev.launch( solve_LD_sh, lpar, stream, ( * this ) );
+//         f_dev.sync_all_streams();
+//         pool_mag.cp_d2h( f_dev );
+//         f_dev.sync_all_streams();
+//         for(int i_src=0;i_src<n_src;i_src++)
+//         {
+//             memos[i_src][phi_R[i_src]] = pool_mag.dat_h[ i_src ].mag * (1-phi_R[i_src]*phi_R[i_src]);       // 对于 phi-1缺省值，这个值是0
+//         }
+
+//         // 继续计算积分
+//         for(int i_src=0;i_src<n_src;i_src++)
+//         {
+//             if(!stacks[i_src].empty())
+//             {
+//                 double* params = stacks[i_src].top();
+//                 double a = params[0];
+//                 double b = params[1];
+//                 double eps = params[2];
+//                 double whole = params[3];
+//                 double depth_value = params[4]; // 注意：深度原本是整数，但我们存储为double
+//                 int depth = static_cast<int>(depth_value);
+//                 double c = (a + b) / 2.0;
+//                 delete[] params;
+
+//                 stacks[i_src].pop();
+
+//                 if (depth >= max_depth) 
+//                 {
+//                     continue;
+//                 }
+//                 double left  = (memos[i_src][a] + 4*memos[i_src][phi_L[i_src]] + memos[i_src][c]) / 6. * (c-a);
+//                 double right = (memos[i_src][c] + 4*memos[i_src][phi_R[i_src]] + memos[i_src][b]) / 6. * (b-c);
+
+
+//                 if (std::abs(left + right - whole) <= eps && depth > 1) {
+//                     // 满足精度要求，累加结果
+//                     LDInte[i_src] += left + right + (left + right - whole) / 15.;       // 15 from Richardson extrapolation
+//                 }
+//                 else {
+//                     // 不满足精度要求，将两个子区间压入栈
+//                     // 深度增加1
+//                     // 左子区间参数
+//                     double* left_params = new double[5];
+//                     left_params[0] = a;
+//                     left_params[1] = c;
+//                     left_params[2] = eps / 2.0;
+//                     left_params[3] = left;
+//                     left_params[4] = static_cast<double>(depth + 1);
+//                     stacks[i_src].push(left_params);
                     
-                    // 右子区间参数
-                    double* right_params = new double[5];
-                    right_params[0] = c;
-                    right_params[1] = b;
-                    right_params[2] = eps / 2.0;
-                    right_params[3] = right;
-                    right_params[4] = static_cast<double>(depth + 1);
-                    stacks[i_src].push(right_params);
+//                     // 右子区间参数
+//                     double* right_params = new double[5];
+//                     right_params[0] = c;
+//                     right_params[1] = b;
+//                     right_params[2] = eps / 2.0;
+//                     right_params[3] = right;
+//                     right_params[4] = static_cast<double>(depth + 1);
+//                     stacks[i_src].push(right_params);
 
-                }
-            }
-        }        
+//                 }
+//             }
+//         }        
                         
 
-    }
+//     }
 
 
-    for(int i_src=0;i_src<n_src;i_src++)
-    {
-        pool_mag.dat_h[ i_src ].mag = ((1-LD_a)*memos[i_src][0] + LD_a*LDInte[i_src]) / (1-LD_a/3); 
-    }
-    pool_mag.cp_h2d( f_dev );
-    f_dev.sync_all_streams();
+//     for(int i_src=0;i_src<n_src;i_src++)
+//     {
+//         pool_mag.dat_h[ i_src ].mag = ((1-LD_a)*memos[i_src][0] + LD_a*LDInte[i_src]) / (1-LD_a/3); 
+//     }
+//     pool_mag.cp_h2d( f_dev );
+//     f_dev.sync_all_streams();
 
 
-    delete[] LDInte;
-    delete[] stacks;
-    delete[] memos;
-    delete[] phi_L;
-    delete[] phi_R;
+//     delete[] LDInte;
+//     delete[] stacks;
+//     delete[] memos;
+//     delete[] phi_L;
+//     delete[] phi_R;
 
-    return;
-}
+//     return;
+// }
 
-__host__ void source_base_t::runLD_MaxErr( device_t & f_dev, double LD_a, int* Nuniform_out, int max_depth )
-{
-    auto n_bl = ( n_src + n_th - 1 ) / n_th;
-    auto s_sh = 0;
-    auto lpar = std::make_tuple
-        ( dim3( n_bl ), dim3( n_th ), s_sh );
-    f_dev.launch( point_approximation, lpar, stream, ( * this ) );
-    n_bl = n_src;
-    s_sh = sizeof(int)*n_th + 
-    std::max( sizeof(float2_t)*n_point_max, 
-              sizeof(float2_t)   * 8*n_th
-            + sizeof(shared_info_t< float2_t >) * 1 
-            + sizeof(cross_info_t) * n_cross_max * 4
-            + sizeof(src_pt_t< float2_t >) * n_th);
+// __host__ void source_base_t::runLD_MaxErr( device_t & f_dev, double LD_a, int* Nuniform_out, int max_depth )
+// {
+//     auto n_bl = ( n_src + n_th - 1 ) / n_th;
+//     auto s_sh = 0;
+//     auto lpar = std::make_tuple
+//         ( dim3( n_bl ), dim3( n_th ), s_sh );
+//     f_dev.launch( point_approximation, lpar, stream, ( * this ) );
+//     n_bl = n_src;
+//     s_sh = sizeof(int)*n_th + 
+//     std::max( sizeof(float2_t)*n_point_max, 
+//               sizeof(float2_t)   * 8*n_th
+//             + sizeof(shared_info_t< float2_t >) * 1 
+//             + sizeof(cross_info_t) * n_cross_max * 4
+//             + sizeof(src_pt_t< float2_t >) * n_th);
 
-    double RelTolS = RelTol/2;                // 待修改，和 LD_a 相关
-    // float2_t* phi_L = new float2_t[n_src];
-    // float2_t* phi_R = new float2_t[n_src];
-    float2_t* LDInte = new float2_t[n_src];
-    float2_t* M0 = new float2_t[n_src];
-    float2_t* Error_now = new float2_t[n_src];
-    float2_t* lowerbound = new float2_t[n_src];
-    bool* finished = new bool[n_src];
+//     double RelTolS = RelTol/2;                // 待修改，和 LD_a 相关
+//     // float2_t* phi_L = new float2_t[n_src];
+//     // float2_t* phi_R = new float2_t[n_src];
+//     float2_t* LDInte = new float2_t[n_src];
+//     float2_t* M0 = new float2_t[n_src];
+//     float2_t* Error_now = new float2_t[n_src];
+//     float2_t* lowerbound = new float2_t[n_src];
+//     bool* finished = new bool[n_src];
 
-    int* Nuniform = new int[n_src];
+//     int* Nuniform = new int[n_src];
 
 
-    // 为每个源创建一个最大堆
-    using ErrorUnit = twinkle::ErrorUnit_t<double>;
-    // std::vector<std::priority_queue<ErrorUnit>> heaps(n_src);
-    std::priority_queue<ErrorUnit>* heaps = new std::priority_queue<ErrorUnit>[n_src];
-    ErrorUnit* EU_buffer = new ErrorUnit[n_src];
-    // std::vector<ErrorUnit> EU_buffer;           // 兼任 L
-    // EU_buffer.reserve(n_src); // 预分配内存
-    ErrorUnit* EU_buffer_R = new ErrorUnit[n_src];
-    // std::vector<ErrorUnit> EU_buffer_R;
-    // EU_buffer_R.reserve(n_src); // 预分配内存
-    ////////////////////////////////////////////////////////////////
+//     // 为每个源创建一个最大堆
+//     using ErrorUnit = twinkle::ErrorUnit_t<double>;
+//     // std::vector<std::priority_queue<ErrorUnit>> heaps(n_src);
+//     std::priority_queue<ErrorUnit>* heaps = new std::priority_queue<ErrorUnit>[n_src];
+//     ErrorUnit* EU_buffer = new ErrorUnit[n_src];
+//     // std::vector<ErrorUnit> EU_buffer;           // 兼任 L
+//     // EU_buffer.reserve(n_src); // 预分配内存
+//     ErrorUnit* EU_buffer_R = new ErrorUnit[n_src];
+//     // std::vector<ErrorUnit> EU_buffer_R;
+//     // EU_buffer_R.reserve(n_src); // 预分配内存
+//     ////////////////////////////////////////////////////////////////
 
-    // 初始化：批量计算根节点所有需要计算的 phi 值
-    // 阶段1: 计算 phi=0 和 phi=0.5
-    for(int i_src=0; i_src<n_src; i_src++)
-    {
-        // EU_buffer.emplace_back(0.0, 1.0);
-        EU_buffer[i_src] = ErrorUnit(0.0,1.0);
-        EU_buffer[i_src].depth = 2;
-        EU_buffer[i_src].val_R() = 0.0; // phi=1, Mag(1-phi**2)=0
-        EU_buffer[i_src].Ncross[4] = 0;
-        Nuniform[i_src] = 0;
-    }
+//     // 初始化：批量计算根节点所有需要计算的 phi 值
+//     // 阶段1: 计算 phi=0 和 phi=0.5
+//     for(int i_src=0; i_src<n_src; i_src++)
+//     {
+//         // EU_buffer.emplace_back(0.0, 1.0);
+//         EU_buffer[i_src] = ErrorUnit(0.0,1.0);
+//         EU_buffer[i_src].depth = 2;
+//         EU_buffer[i_src].val_R() = 0.0; // phi=1, Mag(1-phi**2)=0
+//         EU_buffer[i_src].Ncross[4] = 0;
+//         Nuniform[i_src] = 0;
+//     }
     
-    // 批量计算 phi=0,0.25,0.5,0.75
-    for(int loop_i=0;loop_i<4;loop_i++)
-    {
-        for(int i_src=0; i_src<n_src; i_src++)
-        {
-            pool_phi.dat_h[i_src] = EU_buffer[i_src].phi[loop_i];
-        }
-        f_dev.sync_all_streams();
-        pool_phi.cp_h2d(f_dev);
-        f_dev.sync_all_streams();
-        lpar = std::make_tuple(dim3(n_bl), dim3(n_th), s_sh);
-        f_dev.launch(solve_LD_sh, lpar, stream, (*this));
-        f_dev.sync_all_streams();
-        pool_mag.cp_d2h(f_dev);
-        pool_Ncross.cp_d2h(f_dev);
-        f_dev.sync_all_streams();
-        // 回填 phi=0 结果
-        for(int i_src=0; i_src<n_src; i_src++)
-        {
-            ErrorUnit& eu = EU_buffer[i_src];
-            eu.val[loop_i] = pool_mag.dat_h[i_src].mag * (1.0 - eu.phi[loop_i]*eu.phi[loop_i]); // phi=0
-            eu.Ncross[loop_i] = pool_Ncross.dat_h[i_src];
-            Nuniform[i_src] += 1;
-        }
-    }
+//     // 批量计算 phi=0,0.25,0.5,0.75
+//     for(int loop_i=0;loop_i<4;loop_i++)
+//     {
+//         for(int i_src=0; i_src<n_src; i_src++)
+//         {
+//             pool_phi.dat_h[i_src] = EU_buffer[i_src].phi[loop_i];
+//         }
+//         f_dev.sync_all_streams();
+//         pool_phi.cp_h2d(f_dev);
+//         f_dev.sync_all_streams();
+//         lpar = std::make_tuple(dim3(n_bl), dim3(n_th), s_sh);
+//         f_dev.launch(solve_LD_sh, lpar, stream, (*this));
+//         f_dev.sync_all_streams();
+//         pool_mag.cp_d2h(f_dev);
+//         pool_Ncross.cp_d2h(f_dev);
+//         f_dev.sync_all_streams();
+//         // 回填 phi=0 结果
+//         for(int i_src=0; i_src<n_src; i_src++)
+//         {
+//             ErrorUnit& eu = EU_buffer[i_src];
+//             eu.val[loop_i] = pool_mag.dat_h[i_src].mag * (1.0 - eu.phi[loop_i]*eu.phi[loop_i]); // phi=0
+//             eu.Ncross[loop_i] = pool_Ncross.dat_h[i_src];
+//             Nuniform[i_src] += 1;
+//         }
+//     }
 
 
-    // 循环结束后，统一计算并 push 到堆
-    for(int i_src=0; i_src<n_src; i_src++)
-    {
-        ErrorUnit& eu = EU_buffer[i_src];
-        M0[i_src] = eu.val_L();
-        eu.SimpsonC = (eu.R() - eu.L()) / 6.0 * (eu.val_L() + 4.0*eu.val_C() + eu.val_R());
-        eu.GetError();
+//     // 循环结束后，统一计算并 push 到堆
+//     for(int i_src=0; i_src<n_src; i_src++)
+//     {
+//         ErrorUnit& eu = EU_buffer[i_src];
+//         M0[i_src] = eu.val_L();
+//         eu.SimpsonC = (eu.R() - eu.L()) / 6.0 * (eu.val_L() + 4.0*eu.val_C() + eu.val_R());
+//         eu.GetError();
         
-        LDInte[i_src] = eu.SimpsonL + eu.SimpsonR;
-        Error_now[i_src] = eu.Error;
-        lowerbound[i_src] = eu.lb;
-        heaps[i_src].push(eu);
-    }
+//         LDInte[i_src] = eu.SimpsonL + eu.SimpsonR;
+//         Error_now[i_src] = eu.Error;
+//         lowerbound[i_src] = eu.lb;
+//         heaps[i_src].push(eu);
+//     }
 
-    // printf("val: %.16f,%.16f,%.16f,%.16f,%.16f\n",EU_buffer[960].val[0], EU_buffer[960].val[1], EU_buffer[960].val[2], EU_buffer[960].val[3], EU_buffer[960].val[4]);
-    // printf("Mag1: %.16f\n",(EU_buffer[960].SimpsonL + EU_buffer[960].SimpsonR)*1.5);
-    // printf("Err1: %.16f\n",EU_buffer[960].Error);
-    // printf("Nross: %d,%d,%d,%d,%d\n",EU_buffer[960].Ncross[0],EU_buffer[960].Ncross[1],EU_buffer[960].Ncross[2],EU_buffer[960].Ncross[3],EU_buffer[960].Ncross[4]);
+//     // printf("val: %.16f,%.16f,%.16f,%.16f,%.16f\n",EU_buffer[960].val[0], EU_buffer[960].val[1], EU_buffer[960].val[2], EU_buffer[960].val[3], EU_buffer[960].val[4]);
+//     // printf("Mag1: %.16f\n",(EU_buffer[960].SimpsonL + EU_buffer[960].SimpsonR)*1.5);
+//     // printf("Err1: %.16f\n",EU_buffer[960].Error);
+//     // printf("Nross: %d,%d,%d,%d,%d\n",EU_buffer[960].Ncross[0],EU_buffer[960].Ncross[1],EU_buffer[960].Ncross[2],EU_buffer[960].Ncross[3],EU_buffer[960].Ncross[4]);
 
 
-    bool all_empty = false;
-    while(!all_empty)
-    {
-        all_empty = true;
-        for(int i_src=0;i_src<n_src;i_src++)
-        {
-            if(Error_now[i_src]/lowerbound[i_src] < RelTolS || Nuniform[i_src]>=1000) // 计算已完成
-            {
-                EU_buffer[i_src] = ErrorUnit(-2.,-1.);
-                EU_buffer_R[i_src] = ErrorUnit(-2.,-1.);
-                finished[i_src] = true;
-            }
-            else
-            {
-                all_empty = false;
-                auto max_error = heaps[i_src].top();
-                heaps[i_src].pop();
+//     bool all_empty = false;
+//     while(!all_empty)
+//     {
+//         all_empty = true;
+//         for(int i_src=0;i_src<n_src;i_src++)
+//         {
+//             if(Error_now[i_src]/lowerbound[i_src] < RelTolS || Nuniform[i_src]>=1000) // 计算已完成
+//             {
+//                 EU_buffer[i_src] = ErrorUnit(-2.,-1.);
+//                 EU_buffer_R[i_src] = ErrorUnit(-2.,-1.);
+//                 finished[i_src] = true;
+//             }
+//             else
+//             {
+//                 all_empty = false;
+//                 auto max_error = heaps[i_src].top();
+//                 heaps[i_src].pop();
 
-                auto [euL, euR] = max_error.Split();        // 每次拆开，两个新的区间的 LC,RC，一共4个点，都要计算
-                EU_buffer[i_src] = euL;
-                EU_buffer_R[i_src] = euR;
-                finished[i_src] = false;
+//                 auto [euL, euR] = max_error.Split();        // 每次拆开，两个新的区间的 LC,RC，一共4个点，都要计算
+//                 EU_buffer[i_src] = euL;
+//                 EU_buffer_R[i_src] = euR;
+//                 finished[i_src] = false;
 
-                LDInte[i_src] -= (max_error.SimpsonL+max_error.SimpsonR);
-                Error_now[i_src] -= max_error.Error;
-                lowerbound[i_src] -= max_error.lb;
-            }
-        }
+//                 LDInte[i_src] -= (max_error.SimpsonL+max_error.SimpsonR);
+//                 Error_now[i_src] -= max_error.Error;
+//                 lowerbound[i_src] -= max_error.lb;
+//             }
+//         }
         
-        // 计算 euL 和 euR 的 Mag
-        for(int iphi: {1,3})
-        {
-            // euL
-            for(int i_src=0; i_src<n_src; i_src++)
-            {
-                pool_phi.dat_h[i_src] = EU_buffer[i_src].phi[iphi];        // Left part, LC
-            }
-            f_dev.sync_all_streams();
-            pool_phi.cp_h2d(f_dev);
-            f_dev.sync_all_streams();
-            lpar = std::make_tuple(dim3(n_bl), dim3(n_th), s_sh);
-            f_dev.launch(solve_LD_sh, lpar, stream, (*this));
-            f_dev.sync_all_streams();
-            pool_mag.cp_d2h(f_dev);
-            pool_Ncross.cp_d2h(f_dev);
-            f_dev.sync_all_streams();
-            // 回填 phi=0 结果
-            for(int i_src=0; i_src<n_src; i_src++)
-            {
-                if(!finished[i_src])
-                {
-                    ErrorUnit& euL = EU_buffer[i_src];
-                    euL.val[iphi] = pool_mag.dat_h[i_src].mag * (1.0 - euL.phi[iphi]*euL.phi[iphi]); // phi=0
-                    euL.Ncross[iphi] = pool_Ncross.dat_h[i_src];
-                    Nuniform[i_src] += 1;
-                }
-            }
-            // euR
-            for(int i_src=0; i_src<n_src; i_src++)
-            {
-                pool_phi.dat_h[i_src] = EU_buffer_R[i_src].phi[iphi];        // Left part, LC
-            }
-            f_dev.sync_all_streams();
-            pool_phi.cp_h2d(f_dev);
-            f_dev.sync_all_streams();
-            lpar = std::make_tuple(dim3(n_bl), dim3(n_th), s_sh);
-            f_dev.launch(solve_LD_sh, lpar, stream, (*this));
-            f_dev.sync_all_streams();
-            pool_mag.cp_d2h(f_dev);
-            pool_Ncross.cp_d2h(f_dev);
-            f_dev.sync_all_streams();
-            // 回填 phi=0 结果
-            for(int i_src=0; i_src<n_src; i_src++)
-            {
-                if(!finished[i_src])
-                {
-                    ErrorUnit& euR = EU_buffer_R[i_src];
-                    euR.val[iphi] = pool_mag.dat_h[i_src].mag * (1.0 - euR.phi[iphi]*euR.phi[iphi]); // phi=0
-                    euR.Ncross[iphi] = pool_Ncross.dat_h[i_src];
-                    Nuniform[i_src] += 1;
-                }
-            }
-        }
-        // 完成 euL，euR 相关计算，push到堆里
-        for(int i_src=0; i_src<n_src; i_src++)
-        {
-            if(!finished[i_src])
-            {
-                ErrorUnit& euL = EU_buffer[i_src];
-                euL.GetError();
-                ErrorUnit& euR = EU_buffer_R[i_src];
-                euR.GetError();
+//         // 计算 euL 和 euR 的 Mag
+//         for(int iphi: {1,3})
+//         {
+//             // euL
+//             for(int i_src=0; i_src<n_src; i_src++)
+//             {
+//                 pool_phi.dat_h[i_src] = EU_buffer[i_src].phi[iphi];        // Left part, LC
+//             }
+//             f_dev.sync_all_streams();
+//             pool_phi.cp_h2d(f_dev);
+//             f_dev.sync_all_streams();
+//             lpar = std::make_tuple(dim3(n_bl), dim3(n_th), s_sh);
+//             f_dev.launch(solve_LD_sh, lpar, stream, (*this));
+//             f_dev.sync_all_streams();
+//             pool_mag.cp_d2h(f_dev);
+//             pool_Ncross.cp_d2h(f_dev);
+//             f_dev.sync_all_streams();
+//             // 回填 phi=0 结果
+//             for(int i_src=0; i_src<n_src; i_src++)
+//             {
+//                 if(!finished[i_src])
+//                 {
+//                     ErrorUnit& euL = EU_buffer[i_src];
+//                     euL.val[iphi] = pool_mag.dat_h[i_src].mag * (1.0 - euL.phi[iphi]*euL.phi[iphi]); // phi=0
+//                     euL.Ncross[iphi] = pool_Ncross.dat_h[i_src];
+//                     Nuniform[i_src] += 1;
+//                 }
+//             }
+//             // euR
+//             for(int i_src=0; i_src<n_src; i_src++)
+//             {
+//                 pool_phi.dat_h[i_src] = EU_buffer_R[i_src].phi[iphi];        // Left part, LC
+//             }
+//             f_dev.sync_all_streams();
+//             pool_phi.cp_h2d(f_dev);
+//             f_dev.sync_all_streams();
+//             lpar = std::make_tuple(dim3(n_bl), dim3(n_th), s_sh);
+//             f_dev.launch(solve_LD_sh, lpar, stream, (*this));
+//             f_dev.sync_all_streams();
+//             pool_mag.cp_d2h(f_dev);
+//             pool_Ncross.cp_d2h(f_dev);
+//             f_dev.sync_all_streams();
+//             // 回填 phi=0 结果
+//             for(int i_src=0; i_src<n_src; i_src++)
+//             {
+//                 if(!finished[i_src])
+//                 {
+//                     ErrorUnit& euR = EU_buffer_R[i_src];
+//                     euR.val[iphi] = pool_mag.dat_h[i_src].mag * (1.0 - euR.phi[iphi]*euR.phi[iphi]); // phi=0
+//                     euR.Ncross[iphi] = pool_Ncross.dat_h[i_src];
+//                     Nuniform[i_src] += 1;
+//                 }
+//             }
+//         }
+//         // 完成 euL，euR 相关计算，push到堆里
+//         for(int i_src=0; i_src<n_src; i_src++)
+//         {
+//             if(!finished[i_src])
+//             {
+//                 ErrorUnit& euL = EU_buffer[i_src];
+//                 euL.GetError();
+//                 ErrorUnit& euR = EU_buffer_R[i_src];
+//                 euR.GetError();
 
-                LDInte[i_src] += (euL.SimpsonL+euL.SimpsonR)+(euR.SimpsonL+euR.SimpsonR);
-                // LDInte[i_src] += (euL.SimpsonC)+(euR.SimpsonC);
-                Error_now[i_src] += euL.Error+euR.Error;
-                lowerbound[i_src] += euL.lb+euR.lb;
+//                 LDInte[i_src] += (euL.SimpsonL+euL.SimpsonR)+(euR.SimpsonL+euR.SimpsonR);
+//                 // LDInte[i_src] += (euL.SimpsonC)+(euR.SimpsonC);
+//                 Error_now[i_src] += euL.Error+euR.Error;
+//                 lowerbound[i_src] += euL.lb+euR.lb;
 
-                heaps[i_src].push(euL);
-                heaps[i_src].push(euR);
+//                 heaps[i_src].push(euL);
+//                 heaps[i_src].push(euR);
 
-                if(euL.depth>max_depth)    // 超过最大深度，终止
-                {
-                    Error_now[i_src] = 0.;
-                }
-            }
-        }
+//                 if(euL.depth>max_depth)    // 超过最大深度，终止
+//                 {
+//                     Error_now[i_src] = 0.;
+//                 }
+//             }
+//         }
 
-    }
-
-
-    for(int i_src=0;i_src<n_src;i_src++)
-    {
-        pool_mag.dat_h[ i_src ].mag = ((1-LD_a)*M0[i_src] + LD_a*LDInte[i_src]) / (1-LD_a/3); 
-    }
-    pool_mag.cp_h2d( f_dev );
-    f_dev.sync_all_streams();
+//     }
 
 
-    if(Nuniform_out)
-    {
-        for(int i_src=0; i_src<n_src; i_src++)
-        {
-            Nuniform_out[i_src] = Nuniform[i_src];
-        }
-    }
+//     for(int i_src=0;i_src<n_src;i_src++)
+//     {
+//         pool_mag.dat_h[ i_src ].mag = ((1-LD_a)*M0[i_src] + LD_a*LDInte[i_src]) / (1-LD_a/3); 
+//     }
+//     pool_mag.cp_h2d( f_dev );
+//     f_dev.sync_all_streams();
 
-    delete[] LDInte;
-    // delete[] phi_L;
-    // delete[] phi_R;
-    delete[] M0;
-    delete[] Error_now;
-    delete[] lowerbound;
-    delete[] finished;
-    delete[] EU_buffer;
-    delete[] EU_buffer_R;
-    delete[] Nuniform;
 
-    return;
-}
+//     if(Nuniform_out)
+//     {
+//         for(int i_src=0; i_src<n_src; i_src++)
+//         {
+//             Nuniform_out[i_src] = Nuniform[i_src];
+//         }
+//     }
 
-__host__ void source_base_t::monotest_single(double val_L, double val_R, double Mag_L, double Mag_R, double phi_self, double& val_self, double& Mag_self)
+//     delete[] LDInte;
+//     // delete[] phi_L;
+//     // delete[] phi_R;
+//     delete[] M0;
+//     delete[] Error_now;
+//     delete[] lowerbound;
+//     delete[] finished;
+//     delete[] EU_buffer;
+//     delete[] EU_buffer_R;
+//     delete[] Nuniform;
+
+//     return;
+// }
+
+__host__ bool source_base_t::monotest_single(double val_L, double val_R, double Mag_L, double Mag_R, double phi_self, double& val_self, double& Mag_self)
 {
+    bool changed = false;
     if (val_self > val_L*10. || val_self < val_R*0.1)         // 如果不满足单调性，给这个点插值
     {
         Mag_self = ( Mag_L + Mag_R )/2.;
         val_self = Mag_self * (1 - phi_self*phi_self);
+        changed = true;
     }
 
     // else
     //     printf("(%.16f,%.16f,%.16f),",val_L, val_self, val_R);
         
-    return;
+    return changed;
 }
+
+// __host__ void source_base_t::monotest_astrom(c_t& X0_L, c_t& X0_R, c_t& X0_self, double phi_self)
+// {
+
+//     c_t X0_L = integrand_L
+
+     
+//     return;
+// }
 
 __host__ void source_base_t::monotest(twinkle::ErrorUnit_t<double>& eu)
 {
-    monotest_single(eu.val_L(),eu.val_C(),eu.raw_Mag[0],eu.raw_Mag[2], eu.phi[1], eu.val_LC(),eu.raw_Mag[1]);
-    monotest_single(eu.val_C(),eu.val_R(),eu.raw_Mag[2],eu.raw_Mag[4], eu.phi[3], eu.val_RC(),eu.raw_Mag[3]);
+    bool changed_L = monotest_single(eu.val_L(),eu.val_C(),eu.raw_Mag[0],eu.raw_Mag[2], eu.phi[1], eu.val_LC(),eu.raw_Mag[1]);
+    bool changed_R = monotest_single(eu.val_C(),eu.val_R(),eu.raw_Mag[2],eu.raw_Mag[4], eu.phi[3], eu.val_RC(),eu.raw_Mag[3]);
 
+    if(astrom)
+    {
+        if(changed_L)
+        {
+            eu.astrom_X0[1] = (eu.astrom_X0[0] + eu.astrom_X0[2]) / 2.;
+        }
+        if(changed_R)
+        {
+            eu.astrom_X0[3] = (eu.astrom_X0[2] + eu.astrom_X0[4]) / 2.;
+        }
+    }
     return;
 }
 
@@ -4099,6 +4449,10 @@ __host__ void source_base_t::runLD_beta( device_t & f_dev, double LD_a, int* Nun
     f_dev.launch( point_approximation, lpar, stream, ( * this ) );
     f_dev.sync_all_streams();
     pool_mag.cp_d2h(f_dev);         // 先计算一次点源近似
+    if(astrom)
+    {
+        pool_astrom_Th.cp_d2h(f_dev);
+    }
     // pool_extended.cp_d2h(f_dev);    // 把 SolveSucceed 的信息也拿出来   // 不对，这个不需要，我比较 Mag 和 Err 就行
     n_bl = n_src;
     s_sh = sizeof(int)*n_th + 
@@ -4108,7 +4462,7 @@ __host__ void source_base_t::runLD_beta( device_t & f_dev, double LD_a, int* Nun
             + sizeof(cross_info_t) * n_cross_max * 4
             + sizeof(src_pt_t< float2_t >) * n_th);
 
-    double RelTolS;                // 待修改，和 LD_a 相关
+    double RelTolS;
     if (LD_a != 0)
     {
         RelTolS = min(1., RelTol / LD_a);
@@ -4135,6 +4489,11 @@ __host__ void source_base_t::runLD_beta( device_t & f_dev, double LD_a, int* Nun
     int* Nuniform = new int[n_src];
 
 
+    complex_t<float2_t>* X_LD = new complex_t<float2_t>[n_src];
+    complex_t<float2_t>* X0_max_radius = new complex_t<float2_t>[n_src];
+
+
+
     // 为每个源创建一个最大堆
     using ErrorUnit = twinkle::ErrorUnit_t<double>;
     // std::vector<std::priority_queue<ErrorUnit>> heaps(n_src);
@@ -4153,6 +4512,11 @@ __host__ void source_base_t::runLD_beta( device_t & f_dev, double LD_a, int* Nun
         EU_buffer[i_src].val_R() = 0.0; // phi=1, Mag(1-phi**2)=0
         EU_buffer[i_src].Ncross[4] = 0;
         EU_buffer[i_src].raw_Mag[4]=pool_mag.dat_h[i_src].mag;
+        EU_buffer[i_src].astrom = astrom;
+        if(astrom)
+        {
+            EU_buffer[i_src].astrom_X0[4] = pool_astrom_Th.dat_h[i_src] * pool_mag.dat_h[i_src].mag;
+        }
         // if(i_src==50)
         // {
         //     printf("i_src: %d, raw_Mag: %.16f\n",i_src,EU_buffer[i_src].raw_Mag[4]);
@@ -4235,6 +4599,10 @@ __host__ void source_base_t::runLD_beta( device_t & f_dev, double LD_a, int* Nun
         f_dev.sync_all_streams();
         pool_mag.cp_d2h(f_dev);
         pool_Ncross.cp_d2h(f_dev);
+        if(astrom)
+        {
+            pool_astrom_Th.cp_d2h(f_dev);
+        }
         f_dev.sync_all_streams();
         for(int i_src=0; i_src<n_src; i_src++)
         {
@@ -4247,6 +4615,11 @@ __host__ void source_base_t::runLD_beta( device_t & f_dev, double LD_a, int* Nun
                 eu.raw_Mag[iphi] = mag;
                 eu.Ncross[iphi] = pool_Ncross.dat_h[i_src];
                 Nuniform[i_src] += 1;
+                if(astrom)
+                {
+                    eu.astrom_X0[iphi] = pool_astrom_Th.dat_h[i_src] * mag;
+                    // printf("phi: %.16f, mag: %.16f, X0: %.16f, %.16f, theta: %.16f,%.16f\n", phi, mag, eu.astrom_X0[iphi].re, eu.astrom_X0[iphi].im, eu.astrom_X0[iphi].re/mag, eu.astrom_X0[iphi].im/mag);
+                }
             }
         }
     }
@@ -4286,6 +4659,13 @@ __host__ void source_base_t::runLD_beta( device_t & f_dev, double LD_a, int* Nun
                 ini_finished[i_src] = true;
                 pool_mag.dat_h[i_src].mag = mag_ini;
                 pool_mag.dat_h[i_src].err = E_ini;
+                if(astrom)
+                {
+                    complex_t<double> Th_ini = 1./6.*(eu.astrom_X0[0]*(1.) + 4*eu.astrom_X0[2]*(0.75) + eu.astrom_X0[4]*(0.));
+                    Th_ini = ((1-LD_a)*eu.astrom_X0[0] + LD_a*Th_ini) / (1-LD_a/3);     // 这一步还是 X，不是 Theta
+                    Th_ini /= mag_ini;
+                    pool_astrom_Th.dat_h[i_src] = Th_ini;
+                }
             }
             // printf("(%d,%.16f,%.16f),",i_src,mag_ini,E_ini/mag_ini);
             // printf("(%d,%d),",i_src,finished[i_src]);
@@ -4314,6 +4694,10 @@ __host__ void source_base_t::runLD_beta( device_t & f_dev, double LD_a, int* Nun
         f_dev.sync_all_streams();
         pool_mag.cp_d2h(f_dev);
         pool_Ncross.cp_d2h(f_dev);
+        if(astrom)
+        {
+            pool_astrom_Th.cp_d2h(f_dev);
+        }
         f_dev.sync_all_streams();
         // 回填 phi=0 结果
         for(int i_src=0; i_src<n_src; i_src++)
@@ -4323,7 +4707,13 @@ __host__ void source_base_t::runLD_beta( device_t & f_dev, double LD_a, int* Nun
                 ErrorUnit& eu = EU_buffer[i_src];
                 eu.val[iphi] = pool_mag.dat_h[i_src].mag * (1.0 - eu.phi[iphi]*eu.phi[iphi]); // phi=0
                 eu.Ncross[iphi] = pool_Ncross.dat_h[i_src];
-                Nuniform[i_src] += 1;                
+                Nuniform[i_src] += 1; 
+                if(astrom)
+                {
+                    eu.astrom_X0[iphi] = pool_astrom_Th.dat_h[i_src] * pool_mag.dat_h[i_src].mag;
+                    // printf("phi: %.16f, mag: %.16f, X0: %.16f, %.16f, theta: %.16f,%.16f\n", eu.phi[iphi], pool_mag.dat_h[i_src].mag, eu.astrom_X0[iphi].re, eu.astrom_X0[iphi].im, eu.astrom_X0[iphi].re/pool_mag.dat_h[i_src].mag, eu.astrom_X0[iphi].im/pool_mag.dat_h[i_src].mag);
+
+                }
             }
         }
     }
@@ -4341,12 +4731,22 @@ __host__ void source_base_t::runLD_beta( device_t & f_dev, double LD_a, int* Nun
             ErrorUnit& eu = EU_buffer[i_src];
             M0[i_src] = eu.val_L();
             eu.SimpsonC = (eu.R() - eu.L()) / 6.0 * (eu.val_L() + 4.0*eu.val_C() + eu.val_R());
+            if(astrom)
+            {
+                X0_max_radius[i_src] = eu.astrom_X0[0];
+                eu.SimpsonC_X = (eu.R() - eu.L()) / 6.0 * (eu.astrom_X0[0]*(1-eu.phi[0]*eu.phi[0]) + 4 * eu.astrom_X0[2]*(1-eu.phi[2]*eu.phi[2]) + eu.astrom_X0[4]*(1-eu.phi[4]*eu.phi[4]));
+            }
             eu.GetError();
             
             LDInte[i_src] = eu.SimpsonL + eu.SimpsonR;
+            if(astrom)
+            {
+                X_LD[i_src] = eu.SimpsonL_X + eu.SimpsonR_X;
+            }
             Error_now[i_src] = eu.Error;
             lowerbound[i_src] = eu.lb;
             heaps[i_src].push(eu);
+
         }
     }
 
@@ -4380,6 +4780,10 @@ __host__ void source_base_t::runLD_beta( device_t & f_dev, double LD_a, int* Nun
                 finished[i_src] = false;
 
                 LDInte[i_src] -= (max_error.SimpsonL+max_error.SimpsonR);
+                if(astrom)
+                {
+                    X_LD[i_src] -= (max_error.SimpsonL_X + max_error.SimpsonR_X);
+                }
                 Error_now[i_src] -= max_error.Error;
                 lowerbound[i_src] -= max_error.lb;
             }
@@ -4401,6 +4805,10 @@ __host__ void source_base_t::runLD_beta( device_t & f_dev, double LD_a, int* Nun
             f_dev.sync_all_streams();
             pool_mag.cp_d2h(f_dev);
             pool_Ncross.cp_d2h(f_dev);
+            if(astrom)
+            {
+                pool_astrom_Th.cp_d2h(f_dev);
+            }
             f_dev.sync_all_streams();
             // 回填 phi=0 结果
             for(int i_src=0; i_src<n_src; i_src++)
@@ -4411,6 +4819,12 @@ __host__ void source_base_t::runLD_beta( device_t & f_dev, double LD_a, int* Nun
                     euL.val[iphi] = pool_mag.dat_h[i_src].mag * (1.0 - euL.phi[iphi]*euL.phi[iphi]); // phi=0
                     euL.Ncross[iphi] = pool_Ncross.dat_h[i_src];
                     Nuniform[i_src] += 1;
+                    if(astrom)
+                    {
+                        euL.astrom_X0[iphi] = pool_astrom_Th.dat_h[i_src] * pool_mag.dat_h[i_src].mag;   
+                        // printf("phi: %.16f, mag: %.16f, X0: %.16f, %.16f, theta: %.16f,%.16f\n", euL.phi[iphi], pool_mag.dat_h[i_src].mag, euL.astrom_X0[iphi].re, euL.astrom_X0[iphi].im, euL.astrom_X0[iphi].re/pool_mag.dat_h[i_src].mag, euL.astrom_X0[iphi].im/pool_mag.dat_h[i_src].mag);
+                    }
+
                 }
             }
             // euR
@@ -4426,6 +4840,10 @@ __host__ void source_base_t::runLD_beta( device_t & f_dev, double LD_a, int* Nun
             f_dev.sync_all_streams();
             pool_mag.cp_d2h(f_dev);
             pool_Ncross.cp_d2h(f_dev);
+            if(astrom)
+            {
+                pool_astrom_Th.cp_d2h(f_dev);
+            }
             f_dev.sync_all_streams();
             // 回填 phi=0 结果
             for(int i_src=0; i_src<n_src; i_src++)
@@ -4436,6 +4854,11 @@ __host__ void source_base_t::runLD_beta( device_t & f_dev, double LD_a, int* Nun
                     euR.val[iphi] = pool_mag.dat_h[i_src].mag * (1.0 - euR.phi[iphi]*euR.phi[iphi]); // phi=0
                     euR.Ncross[iphi] = pool_Ncross.dat_h[i_src];
                     Nuniform[i_src] += 1;
+                    if(astrom)
+                    {
+                        euR.astrom_X0[iphi] = pool_astrom_Th.dat_h[i_src] * pool_mag.dat_h[i_src].mag;
+                        // printf("phi: %.16f, mag: %.16f, X0: %.16f, %.16f, theta: %.16f,%.16f\n", euR.phi[iphi], pool_mag.dat_h[i_src].mag, euR.astrom_X0[iphi].re, euR.astrom_X0[iphi].im, euR.astrom_X0[iphi].re/pool_mag.dat_h[i_src].mag, euR.astrom_X0[iphi].im/pool_mag.dat_h[i_src].mag);
+                    }
                 }
             }
         }
@@ -4452,6 +4875,8 @@ __host__ void source_base_t::runLD_beta( device_t & f_dev, double LD_a, int* Nun
                 euR.GetError();
 
                 LDInte[i_src] += (euL.SimpsonL+euL.SimpsonR)+(euR.SimpsonL+euR.SimpsonR);
+                if(astrom)
+                    X_LD[i_src] += (euL.SimpsonL_X+euL.SimpsonR_X)+(euR.SimpsonL_X+euR.SimpsonR_X);
                 Error_now[i_src] += euL.Error+euR.Error;
                 lowerbound[i_src] += euL.lb+euR.lb;
 
@@ -4471,11 +4896,22 @@ __host__ void source_base_t::runLD_beta( device_t & f_dev, double LD_a, int* Nun
     for(int i_src=0;i_src<n_src;i_src++)
     {
         if(ini_finished[i_src] == false)
-            {pool_mag.dat_h[ i_src ].mag = ((1-LD_a)*M0[i_src] + LD_a*LDInte[i_src]) / (1-LD_a/3); }
+        {
+            f_t return_mag = ((1-LD_a)*M0[i_src] + LD_a*LDInte[i_src]) / (1-LD_a/3);
+            pool_mag.dat_h[ i_src ].mag = return_mag; 
+            if(astrom)
+            {
+                complex_t<float2_t> return_X_LD = ((1-LD_a)*X0_max_radius[i_src] + LD_a*X_LD[i_src]) / (1-LD_a/3); 
+                pool_astrom_Th.dat_h[ i_src ] = return_X_LD / return_mag;
+            }
+        }
     }
     pool_mag.cp_h2d( f_dev );
+    if(astrom)
+    {
+        pool_astrom_Th.cp_h2d( f_dev );        
+    }
     f_dev.sync_all_streams();
-
 
     if(Nuniform_out)
     {
@@ -4497,6 +4933,8 @@ __host__ void source_base_t::runLD_beta( device_t & f_dev, double LD_a, int* Nun
     delete[] caustic_pts;
     delete[] phi_hidden;
     delete[] heaps;
+    delete[] X_LD;
+    delete[] X0_max_radius;
 
     return;
 }

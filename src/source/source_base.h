@@ -78,6 +78,10 @@ __global__ void solve_extended_sh( const src_T src )
         src.pool_mag[ i_src ] = local_info.src_ret;
         // printf("(%d, Ncross: %d, mag: %.6f), ",i_src, local_info.shared_info->Ncross, local_info.src_ret.mag);
         src.pool_Ncross[ i_src ] = local_info.shared_info->Ncross_all;
+        if(src.astrom)
+        {
+            src.pool_astrom_Th[ i_src ] = local_info.src_astrom_Th;
+        }
 
         // if(local_info.src_ext.Break)
         // {
@@ -141,6 +145,10 @@ __global__ void solve_LD_sh( const src_T src )
         // src.pool_mag[ i_src ] = local_info.src_ret;
         src.pool_mag[ i_src ].mag = M0;
         src.pool_Ncross[ i_src ] = local_info.shared_info->Ncross_all;
+        if(src.astrom)
+        {
+            src.pool_astrom_Th[ i_src ] = local_info.src_astrom_Th;
+        }
     }
 
 }
@@ -186,6 +194,7 @@ public:                      // Data
     pool_t<               f_t   > pool_lens_s;
     pool_t<               f_t   >    pool_phi;
     pool_t<               int   > pool_Ncross;
+    pool_t<               c_t   > pool_astrom_Th;
 
 public:                         // Functions
     __host__ virtual void init( device_t & f_dev );
@@ -215,6 +224,7 @@ public:
     f_t        m1;
     f_t        m2;
     f_t        a1;          // for linear limb darkening
+    bool   astrom;         // astrometry model
     // int  batchidx;
     
     ////////// Device-side interfaces //////////
@@ -309,6 +319,8 @@ public:
 
     __device__ f_t delta_s_1
     ( const c_t & z_here, const c_t & z_next) const;
+    __device__ void delta_X_1
+    ( f_t& real, f_t&imag, const c_t & z_here, const c_t & z_next) const;
     __device__ f_t wedge_product
     ( const c_t &z1, const c_t &z2 ) const;
     __device__ void deltaS_error_image
@@ -322,7 +334,8 @@ public:
     __device__ void deltaS_error_parity
     ( f_t * deltaS_new_out, f_t * Err_new_out, const bool parity,
     const int here_idx, const int other_idx,
-    const src_pt_t < f_t > * pt_here, const src_pt_t < f_t > * pt_other)    const;
+    const src_pt_t < f_t > * pt_here, const src_pt_t < f_t > * pt_other,
+    c_t * astromX_out=nullptr)    const;
 
     __device__ void deltaS_error_cross
     ( f_t & deltaS, f_t & Error1234, const int j0, const int j1, const bool ghost_direction,
@@ -330,6 +343,14 @@ public:
     __device__ void deltaS_error_cross_beta
     ( f_t & deltaS, f_t & Error1234, const int j0, const int j1, const bool ghost_direction,
     const src_pt_t < f_t > * pt_here ) const;
+
+    __device__ void deltaX_normal
+    ( c_t & delta_astromX, const int j,
+    const src_pt_t < f_t > * pt_here, const src_pt_t < f_t > * pt_other,
+    const f_t & theta3) const;
+    __device__ void deltaX_cross
+    ( c_t & delta_astromX, const int j0, const int j1, const bool ghost_direction,
+    const src_pt_t < f_t > * pt_here) const;
 
     __device__ int bisearch_left
     (const f_t* values_in_order, const f_t to_insert, const int len) const;
@@ -371,11 +392,11 @@ public:
     __host__ virtual void run( device_t & f_dev );
     __host__ virtual void run_pt( device_t & f_dev );
     // __host__ virtual void runLD( device_t & f_dev, double LD_a=1, int depth=4 );
-    __host__ virtual void runLD_A( device_t & f_dev, double LD_a=1, int max_depth=10 );
-    __host__ virtual void runLD_MaxErr( device_t & f_dev, double LD_a=1, int* Nuniform_out=nullptr, int max_depth=30 );
+    // __host__ virtual void runLD_A( device_t & f_dev, double LD_a=1, int max_depth=10 );
+    // __host__ virtual void runLD_MaxErr( device_t & f_dev, double LD_a=1, int* Nuniform_out=nullptr, int max_depth=30 );
     __host__ virtual void runLD_beta( device_t & f_dev, double LD_a=1, int* Nuniform_out=nullptr, int max_depth=30 );
 
-    __host__ virtual void monotest_single(double val_L, double val_R, double Mag_L, double Mag_R, double phi_self, double& val_self, double& Mag_self);
+    __host__ virtual bool monotest_single(double val_L, double val_R, double Mag_L, double Mag_R, double phi_self, double& val_self, double& Mag_self);
     __host__ virtual void monotest(twinkle::ErrorUnit_t<double>& eu);
     __host__ virtual void caustic_cal(double lens_s, double lens_q, c_t* caustic_points);
     __host__ virtual void hidden_phi(c_t* caustic_pts, const c_t& loc_center, double rho, double* phi_hidden);

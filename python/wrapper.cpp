@@ -37,31 +37,41 @@ static int PyTwinkle_init(PyTwinkle* self, PyObject* args, PyObject* kwargs) {
     int device_num = 0;
     int n_stream = 1;
     double RelTol = 1e-4;
+    int astrom = 0;
 
     // 定义参数选项
     static char* kwlist1[] = {(char*)"n_srcs", (char*)"device_num", (char*)"n_stream", (char*)"RelTol", NULL};
     static char* kwlist2[] = {(char*)"n_srcs", (char*)"device_num", (char*)"n_stream", NULL};
+    static char* kwlist3[] = {(char*)"n_srcs", (char*)"device_num", (char*)"n_stream", (char*)"RelTol", (char*)"astrom", NULL};
     
     // 解析参数字典
-    if (PyArg_ParseTupleAndKeywords(args, kwargs, "iiid", kwlist1, &n_srcs, &device_num, &n_stream, &RelTol))
+    if  (PyArg_ParseTupleAndKeywords(args, kwargs, "iiidi", kwlist3, &n_srcs, &device_num, &n_stream, &RelTol, &astrom))
     {    }
     else
     {
         PyErr_Clear();
-        if (PyArg_ParseTupleAndKeywords(args, kwargs, "iii", kwlist2, &n_srcs, &device_num, &n_stream))
-        {  
-            printf("In new version, RelTol is set in init(), default 1e-4. The RelTol in set_params() won't be used\n");
-        }
+        if (PyArg_ParseTupleAndKeywords(args, kwargs, "iiid", kwlist1, &n_srcs, &device_num, &n_stream, &RelTol))
+        {    }
         else
         {
-            return -1;
-        }
+            PyErr_Clear();
+            if (PyArg_ParseTupleAndKeywords(args, kwargs, "iii", kwlist2, &n_srcs, &device_num, &n_stream))
+            {  
+                // printf("In new version, RelTol is set in init(), default 1e-4. The RelTol in set_params() won't be used\n");
+                printf("RelTol should be set in init(), default 1e-4.\n");
+            }
+            else
+            {
+                return -1;
+            }
+        }        
     }
+
 
 
     try {
         self->obj = new twinkle::driver_t();
-        self->obj->init(n_srcs, device_num, n_stream, RelTol);
+        self->obj->init(n_srcs, device_num, n_stream, RelTol, astrom);
     } 
     catch (const std::bad_alloc& e) {
         PyErr_SetString(PyExc_MemoryError, "Memory allocation failed");
@@ -82,7 +92,7 @@ static int PyTwinkle_init(PyTwinkle* self, PyObject* args, PyObject* kwargs) {
 
 static PyObject* PyTwinkle_set_params(PyTwinkle *self, PyObject *args) {
     PyObject *py_ss = nullptr;
-    double qq = 0.0, rho = 0.0, RelTol = 0.0;
+    double qq = 0.0, rho = 0.0, RelTol = -1.0;
     PyObject *py_xs = nullptr, *py_ys = nullptr;
     PyArrayObject *arr_xs = nullptr, *arr_ys = nullptr, *arr_ss = nullptr;
     npy_intp len_x = 0, len_y = 0; // 提前声明变量
@@ -130,15 +140,17 @@ static PyObject* PyTwinkle_set_params(PyTwinkle *self, PyObject *args) {
     }
 
     try {
-        // 情况1: ss 是浮点数（标量）
-        if (PyFloat_Check(py_ss)) {
-            double ss_value = PyFloat_AsDouble(py_ss);
-            self->obj->set_params(ss_value, qq, rho, 
-                                 (double*)PyArray_DATA(arr_xs), 
-                                 (double*)PyArray_DATA(arr_ys));
-        }
-        // 情况2: ss 是数组
-        else {
+        if(RelTol<=0.)      //  如果没设置 RelTol
+        {
+            // 情况1: ss 是浮点数（标量）
+            if (PyFloat_Check(py_ss)) {
+                double ss_value = PyFloat_AsDouble(py_ss);
+                self->obj->set_params(ss_value, qq, rho, 
+                                    (double*)PyArray_DATA(arr_xs), 
+                                    (double*)PyArray_DATA(arr_ys));
+            }
+            // 情况2: ss 是数组
+            else {
             arr_ss = (PyArrayObject*)PyArray_FromAny(py_ss, 
                 PyArray_DescrFromType(NPY_DOUBLE), 1, 1,
                 NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED, NULL);
@@ -160,6 +172,41 @@ static PyObject* PyTwinkle_set_params(PyTwinkle *self, PyObject *args) {
             self->obj->set_params((double*)PyArray_DATA(arr_ss), qq, rho, 
                                  (double*)PyArray_DATA(arr_xs), 
                                  (double*)PyArray_DATA(arr_ys));
+            }
+        }
+        else
+        {
+            // 情况1: ss 是浮点数（标量）
+            if (PyFloat_Check(py_ss)) {
+                double ss_value = PyFloat_AsDouble(py_ss);
+                self->obj->set_params(ss_value, qq, rho, RelTol,
+                                    (double*)PyArray_DATA(arr_xs), 
+                                    (double*)PyArray_DATA(arr_ys));
+            }
+            // 情况2: ss 是数组
+            else {
+            arr_ss = (PyArrayObject*)PyArray_FromAny(py_ss, 
+                PyArray_DescrFromType(NPY_DOUBLE), 1, 1,
+                NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED, NULL);
+            
+            if (!arr_ss) {
+                PyErr_SetString(PyExc_TypeError, 
+                    "ss must be float or 1D contiguous float64 array");
+                goto cleanup;
+            }
+            
+            // 检查 ss 数组长度
+            npy_intp len_s = PyArray_SIZE(arr_ss);
+            if (len_s != len_x) {
+                PyErr_SetString(PyExc_ValueError, 
+                    "ss array length must match xs/ys length");
+                goto cleanup;
+            }
+            
+            self->obj->set_params((double*)PyArray_DATA(arr_ss), qq, rho, RelTol,
+                                 (double*)PyArray_DATA(arr_xs), 
+                                 (double*)PyArray_DATA(arr_ys));
+            }
         }
         
         // 释放所有数组引用
@@ -237,10 +284,49 @@ static PyObject* PyTwinkle_return_Ncross_to(PyTwinkle *self, PyObject *args) {
     }
 }
 
+// return_astrom_to()方法包装（需配合NumPy使用）
+static PyObject* PyTwinkle_return_astrom_to(PyTwinkle *self, PyObject *args) {
+    PyArrayObject *py_array;
+    if (!PyArg_ParseTuple(args, "O!", &PyArray_Type, &py_array)) {
+        PyErr_SetString(PyExc_TypeError, "Argument must be a numpy array");
+        return NULL;
+    }
+
+    if (PyArray_NDIM(py_array) != 1 || 
+        PyArray_TYPE(py_array) != NPY_COMPLEX128)  // 修改为复数数组
+    {
+        PyErr_SetString(PyExc_ValueError, 
+            "Need 1D complex128 array");
+        return NULL;
+    }
+
+    twinkle::complex_t<double>* buffer = (twinkle::complex_t<double>*)PyArray_DATA(py_array);
+    const npy_intp size = PyArray_SIZE(py_array);
+
+    try {
+        self->obj->return_astrom_to(buffer);  // 调用对应的C++函数
+        Py_RETURN_NONE;
+    } catch (const std::exception& e) {
+        PyErr_SetString(PyExc_RuntimeError, e.what());
+        return NULL;
+    }
+}
+
 // run()方法包装
 static PyObject* PyTwinkle_run(PyTwinkle *self, PyObject *Py_UNUSED(ignored)) {
     try {
         self->obj->run();
+        Py_RETURN_NONE;
+    } catch (const std::exception& e) {
+        PyErr_SetString(PyExc_RuntimeError, e.what());
+        return NULL;
+    }
+}
+
+// run_point_source()方法包装
+static PyObject* PyTwinkle_run_pt(PyTwinkle *self, PyObject *Py_UNUSED(ignored)) {
+    try {
+        self->obj->run_pt();
         Py_RETURN_NONE;
     } catch (const std::exception& e) {
         PyErr_SetString(PyExc_RuntimeError, e.what());
@@ -271,28 +357,28 @@ static PyObject* PyTwinkle_runLD(PyTwinkle *self, PyObject *args) {
         return NULL;
     }
 }
-static PyObject* PyTwinkle_runLD2(PyTwinkle *self, PyObject *args) {
-    double LD_a;
+// static PyObject* PyTwinkle_runLD2(PyTwinkle *self, PyObject *args) {
+//     double LD_a;
     
-    // 解析参数：期望一个浮点数参数
-    if (!PyArg_ParseTuple(args, "d", &LD_a)) {
-        return NULL;  // 参数解析失败，Python会自动设置异常
-    }
+//     // 解析参数：期望一个浮点数参数
+//     if (!PyArg_ParseTuple(args, "d", &LD_a)) {
+//         return NULL;  // 参数解析失败，Python会自动设置异常
+//     }
     
-    // 可选：验证参数范围
-    if (LD_a < 0.0 || LD_a > 1.0) {
-        PyErr_SetString(PyExc_ValueError, "LD_a must be between 0.0 and 1.0");
-        return NULL;
-    }
+//     // 可选：验证参数范围
+//     if (LD_a < 0.0 || LD_a > 1.0) {
+//         PyErr_SetString(PyExc_ValueError, "LD_a must be between 0.0 and 1.0");
+//         return NULL;
+//     }
     
-    try {
-        self->obj->runLD2(LD_a);
-        Py_RETURN_NONE;
-    } catch (const std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError, e.what());
-        return NULL;
-    }
-}
+//     try {
+//         self->obj->runLD2(LD_a);
+//         Py_RETURN_NONE;
+//     } catch (const std::exception& e) {
+//         PyErr_SetString(PyExc_RuntimeError, e.what());
+//         return NULL;
+//     }
+// }
 
 static PyObject* get_numpy_build_version(PyObject* self, PyObject* args) {
     // 优先使用 NumPy 提供的字符串宏
@@ -318,9 +404,11 @@ static PyMethodDef PyTwinkle_methods[] = {
     {"set_params", (PyCFunction)PyTwinkle_set_params, METH_VARARGS, "Set parameters"},
     {"return_mag_to", (PyCFunction)PyTwinkle_return_mag_to, METH_VARARGS, "Write results to numpy array"},
     {"return_Ncross_to", (PyCFunction)PyTwinkle_return_Ncross_to, METH_VARARGS, "Write results to numpy array"},
+    {"return_astrom_to", (PyCFunction)PyTwinkle_return_astrom_to, METH_VARARGS, "Write results to numpy array"},
     {"run", (PyCFunction)PyTwinkle_run, METH_NOARGS, "Execute computation"},
+    {"run_pt", (PyCFunction)PyTwinkle_run_pt, METH_NOARGS, "point source approximation"},
     {"runLD", (PyCFunction)PyTwinkle_runLD, METH_VARARGS, "Run limb darkening calculation with given linear LD coefficient"},
-    {"runLD2", (PyCFunction)PyTwinkle_runLD2, METH_VARARGS, "test version, Run limb darkening calculation with given linear LD coefficient"},
+    // {"runLD2", (PyCFunction)PyTwinkle_runLD2, METH_VARARGS, "test version, Run limb darkening calculation with given linear LD coefficient"},
     {"get_numpy_build_version", get_numpy_build_version, METH_NOARGS, "Build-time numpy version"},
     {NULL, NULL, 0, NULL}  // Sentinel
 };

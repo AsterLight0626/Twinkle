@@ -16,7 +16,7 @@ class driver_t
 public:
      driver_t(  );
     ~driver_t(  );
-    virtual void init( const int n_srcs, const int device_num=0, const int n_stream=1, const double RELTOL=1e-4 );
+    virtual void init( const int n_srcs, const int device_num=0, const int n_stream=1, const double RELTOL=1e-4, const bool astrom=false );
     // virtual void init( const int n_srcs, const int device_num, const int n_stream, const double RELTOL);
     // virtual void set_params_2D( double ss, double qq, double rho, double xmax, double xmin, double ymax, double ymin, int Nx, int Ny );
     // virtual void set_params_1D( double ss, double qq, double rho, double xmax, double xmin, double ymax, double ymin, int Nsrc );
@@ -27,6 +27,7 @@ public:
     virtual void return_mag_to( double* mag );
     virtual void return_mag_err_to( double* mag, double* err );
     virtual void return_Ncross_to( int* Ncross );
+    virtual void return_astrom_to(twinkle::complex_t<double>* astrom_Th );
     virtual void free(  );    
 
     int n_srcs_all;
@@ -44,10 +45,10 @@ public:
     virtual void run(  );
     virtual void run_pt(  );
     virtual void runLD( double LD_a=1, int* Nuniform=nullptr );
-    virtual void runLD1( double LD_a=1 );
-    virtual void runLD2( double LD_a=1 );
-    virtual void runLD_Nuniform( double LD_a, int* Nuniform );
-    virtual void runLD_beta( double LD_a, int* Nuniform );
+    // virtual void runLD1( double LD_a=1 );
+    // virtual void runLD2( double LD_a=1 );
+    // virtual void runLD_Nuniform( double LD_a, int* Nuniform );
+    // virtual void runLD_beta( double LD_a, int* Nuniform );
 };
 
 };

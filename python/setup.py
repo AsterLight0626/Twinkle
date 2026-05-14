@@ -117,7 +117,7 @@ cuda_extension = CUDAExtension(
 
 setup(
     name='twinkle',
-    version='1.0',
+    version='1.1',
     install_requires=['numpy'],
     ext_modules=[cuda_extension],
     cmdclass={'build_ext': CustomBuildExt}

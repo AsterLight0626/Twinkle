@@ -37,6 +37,10 @@ struct src_pt_t
 	f_T                error_interval;
 	f_T                 area_interval;
 
+	// astrometry
+	complex_t < f_T >  	delta_astromX[ n_img ];
+	complex_t < f_T >  		  astromX_interval;
+
 };
 
 };                              // namespace twinkle

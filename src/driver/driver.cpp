@@ -50,7 +50,7 @@ driver_t::~driver_t(  )
 //     return;
 // }
 
-void driver_t::init( const int n_srcs, const int device_num, const int n_stream, const double RELTOL)
+void driver_t::init( const int n_srcs, const int device_num, const int n_stream, const double RELTOL, const bool astrom)
 {
 
     vp_sol.resize( n_stream );
@@ -70,6 +70,7 @@ void driver_t::init( const int n_srcs, const int device_num, const int n_stream,
         p_sol->streamidx = i;
         p_sol->init( * p_dev );
         p_sol->RelTol    =   RELTOL;
+        p_sol->astrom = astrom;
     }
     auto & p_sol = vp_sol[vp_sol.size()-1];
     p_sol = std::make_shared< source_base_t > (  );
@@ -77,6 +78,7 @@ void driver_t::init( const int n_srcs, const int device_num, const int n_stream,
     p_sol->streamidx = vp_sol.size()-1;
     p_sol->init( * p_dev );
     p_sol->RelTol    =   RELTOL;
+    p_sol->astrom = astrom;
 
     return;
 }
@@ -249,6 +251,27 @@ void driver_t::return_Ncross_to( int* Ncross )
     } 
 }
 
+void driver_t::return_astrom_to( twinkle::complex_t<double>* astrom_Th )
+{
+    int n_src_per_stream = (n_srcs_all-1) / vp_sol.size() + 1;  // vp_sol.size = nstream
+    if(vp_sol[0]->astrom)
+    {
+        for( auto & p_sol : vp_sol )
+        {
+            p_sol->pool_astrom_Th.cp_d2h( * p_dev );
+        }
+        for(int idx=0;idx<n_srcs_all;idx++)
+        {
+            astrom_Th[idx] = vp_sol[ idx/n_src_per_stream ]->pool_astrom_Th.dat_h[ idx%n_src_per_stream ];
+        }         
+    }
+    else
+    {
+        printf("The bool value 'astrom' in init() is set to be false, no astrometry calculation.\n");
+    }
+
+}
+
 void driver_t::free(  )
 {
     for( auto & p_sol : vp_sol )    
@@ -271,8 +294,12 @@ void driver_t::run(  )
 
 void driver_t::run_pt(  )
 {
-    for( auto & p_sol : vp_sol )    
+    for( auto & p_sol : vp_sol )
+    {
+        auto & shape  = p_sol->pool_center.dat_h[ 0 ];
         p_sol-> run_pt ( *  p_dev );
+    }
+
     p_dev->sync_all_streams(   );
     return;
 }
@@ -286,37 +313,37 @@ void driver_t::runLD( double LD_a, int* Nuniform )
     return;
 }
 
-void driver_t::runLD1( double LD_a )
-{
-    for( auto & p_sol : vp_sol )    
-        p_sol-> runLD_A ( *  p_dev, LD_a );
-    p_dev->sync_all_streams(   );
-    return;
-}
+// void driver_t::runLD1( double LD_a )
+// {
+//     for( auto & p_sol : vp_sol )    
+//         p_sol-> runLD_A ( *  p_dev, LD_a );
+//     p_dev->sync_all_streams(   );
+//     return;
+// }
 
-void driver_t::runLD2( double LD_a )
-{
-    for( auto & p_sol : vp_sol )    
-        p_sol-> runLD_MaxErr ( *  p_dev, LD_a );
-    p_dev->sync_all_streams(   );
-    return;
-}
+// void driver_t::runLD2( double LD_a )
+// {
+//     for( auto & p_sol : vp_sol )    
+//         p_sol-> runLD_MaxErr ( *  p_dev, LD_a );
+//     p_dev->sync_all_streams(   );
+//     return;
+// }
 
-void driver_t::runLD_Nuniform( double LD_a, int* Nuniform )
-{
-    for( auto & p_sol : vp_sol )    
-        p_sol-> runLD_MaxErr ( *  p_dev, LD_a, Nuniform );
-    p_dev->sync_all_streams(   );
-    return;
-}
+// void driver_t::runLD_Nuniform( double LD_a, int* Nuniform )
+// {
+//     for( auto & p_sol : vp_sol )    
+//         p_sol-> runLD_MaxErr ( *  p_dev, LD_a, Nuniform );
+//     p_dev->sync_all_streams(   );
+//     return;
+// }
 
-void driver_t::runLD_beta( double LD_a, int* Nuniform )
-{
-    for( auto & p_sol : vp_sol )    
-        p_sol-> runLD_beta ( *  p_dev, LD_a, Nuniform );
-    p_dev->sync_all_streams(   );
-    return;
-}
+// void driver_t::runLD_beta( double LD_a, int* Nuniform )
+// {
+//     for( auto & p_sol : vp_sol )    
+//         p_sol-> runLD_beta ( *  p_dev, LD_a, Nuniform );
+//     p_dev->sync_all_streams(   );
+//     return;
+// }
 
 };
  

@@ -11,11 +11,14 @@ namespace twinkle
 template< class f_T >
 struct ErrorUnit_t
 {
+    // astrometry 标记
+    bool astrom = false;
     // 核心数据数组
     std::array<f_T, 5> phi;     // [L, LC, C, RC, R]
     std::array<f_T, 5> val;     // [val_L, val_LC, val_C, val_RC, val_R]
     std::array<int, 5> Ncross;  // [nc_L, nc_LC, nc_C, nc_RC, nc_R]
     std::array<f_T, 5> raw_Mag; // 2603 新增：用于 monotest
+    std::array<complex_t<f_T>, 5> astrom_X0;   // 2605 新增：用于 astrometry
 
     // 访问函数（替代引用成员）
     f_T& L() { return phi[0]; }
@@ -47,6 +50,7 @@ struct ErrorUnit_t
     int depth;                   // 递归深度
     f_T ub, lb;                  // 上下界
     f_T* phi_hidden = nullptr;             // hidden error
+    complex_t<f_T> SimpsonC_X, SimpsonL_X, SimpsonR_X;
 
     static constexpr double coeff_ec = 0.1;      // 2603 新增：cross error
 
@@ -72,6 +76,10 @@ struct ErrorUnit_t
         val.fill(static_cast<f_T>(0));
         Ncross.fill(-1);
         raw_Mag.fill(-1.);
+        if(astrom)
+        {
+            astrom_X0.fill(0.);
+        }
     }
 
     ErrorUnit_t() 
@@ -91,6 +99,11 @@ struct ErrorUnit_t
     {
         SimpsonL = h / 12 * (val_L() + 4 * val_LC() + val_C());
         SimpsonR = h / 12 * (val_C() + 4 * val_RC() + val_R());
+        if(astrom)
+        {
+            SimpsonL_X = h / 12 * (astrom_X0[0]*(1-phi[0]*phi[0]) + 4 * astrom_X0[1]*(1-phi[1]*phi[1]) + astrom_X0[2]*(1-phi[2]*phi[2]));
+            SimpsonR_X = h / 12 * (astrom_X0[2]*(1-phi[2]*phi[2]) + 4 * astrom_X0[3]*(1-phi[3]*phi[3]) + astrom_X0[4]*(1-phi[4]*phi[4]));
+        }
     }
     
     
@@ -109,6 +122,13 @@ struct ErrorUnit_t
         euL.depth = depth + 1;
         euL.ub = ub;  // 继承容差，后续会重新分配
         euL.phi_hidden = phi_hidden;
+        euL.astrom = astrom;
+        if(astrom)
+        {
+            euL.astrom_X0[0] = astrom_X0[0];
+            euL.astrom_X0[4] = astrom_X0[2];
+            euL.astrom_X0[2] = astrom_X0[1];
+        }
         
         // 右子单元: [C, R]
         ErrorUnit_t euR(phi[2], phi[4]);
@@ -122,6 +142,13 @@ struct ErrorUnit_t
         euR.depth = depth + 1;
         euR.ub = ub;  // 继承容差，后续会重新分配
         euR.phi_hidden = phi_hidden;
+        euR.astrom = astrom;
+        if(astrom)
+        {
+            euR.astrom_X0[0] = astrom_X0[0];
+            euR.astrom_X0[4] = astrom_X0[2];
+            euR.astrom_X0[2] = astrom_X0[1];
+        }
         
         return {euL, euR};
     }
@@ -162,23 +189,25 @@ struct ErrorUnit_t
         }
     }
 
-    // 数值稳定性检验（新增，来自 Python monotest）
-    void monotest(const ErrorUnit_t& parent, f_T phi_self, f_T val_self_raw, 
-                  f_T& val_out, f_T& mag_out)
-    {
+    // // 数值稳定性检验（新增，来自 Python monotest）
+    // void monotest(const ErrorUnit_t& parent, f_T phi_self, f_T val_self_raw, 
+    //               f_T& val_out, f_T& mag_out)
+    // {
 
-        f_T mag_interp = (parent.Mag[0] + parent.Mag[4]) / 2.0;
-        f_T val_interp = mag_interp * (1 - phi_self * phi_self);
+    //     f_T mag_interp = (parent.Mag[0] + parent.Mag[4]) / 2.0;
+    //     f_T val_interp = mag_interp * (1 - phi_self * phi_self);
         
-        // 如果偏差过大，使用插值替代
-        if(val_self_raw > parent.val[0] * 10 || val_self_raw < parent.val[4] * 0.1) {
-            val_out = val_interp;
-            mag_out = mag_interp;
-        } else {
-            val_out = val_self_raw;
-            mag_out = val_self_raw / (1 - phi_self * phi_self);
-        }
-    }
+    //     // 如果偏差过大，使用插值替代
+    //     if(val_self_raw > parent.val[0] * 2 || val_self_raw < parent.val[4] * 0.5) 
+    //     // if(false)
+    //     {
+    //         val_out = val_interp;
+    //         mag_out = mag_interp;
+    //     } else {
+    //         val_out = val_self_raw;
+    //         mag_out = val_self_raw / (1 - phi_self * phi_self);
+    //     }
+    // }
 };
 
 }  // namespace twinkle

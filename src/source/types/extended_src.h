@@ -30,6 +30,9 @@ struct src_ext_t
 	// int                  points_used;	
 	// int                       Ncross;
 	complex_t< f_T > roots_point[5];
+
+	// astrometry
+	complex_t< f_T >		 astromX;
  
 };
 

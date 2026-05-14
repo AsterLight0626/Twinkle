@@ -15,6 +15,8 @@ struct local_info_t
     src_shape_t< f_T >      src_shape;
     src_ext_t  < f_T >        src_ext;
     src_ret_t  < f_T >        src_ret;
+    // 这里要加一个和 src_ret 定位一样的，用来记录局部 astrom 求和的量
+    complex_t  < f_T >  src_astrom_Th;
     int                  neighbor3[3];
     // int                 *  global_idx;
     src_pt_t   < f_T >        pt_prev;
@@ -23,6 +25,7 @@ struct local_info_t
 
     f_T                 *  deltaS_sum;
     f_T                 *     Err_sum;
+    complex_t  < f_T >  * astromX_sum;
 
     shared_info_t< f_T >* shared_info;
     cross_info_t        *  cross_info;
@@ -54,10 +57,17 @@ struct local_info_t
         offset += sizeof(f_T)   * 4*n_th;
 
         this -> Err_sum  = ( f_T  * ) &dat_sh[offset];       // size = 4*n_th
-        offset += sizeof(f_T)   * 4*n_th;        
+        offset += sizeof(f_T)   * 4*n_th;  
+        
+        this -> astromX_sum  = ( complex_t  < f_T >  * ) &dat_sh[offset];       // size = 4*n_th
+        offset += sizeof(complex_t  < f_T >)   * 4*n_th;  
 
         this -> cross_info = ( cross_info_t  *  ) &dat_sh[offset];      // size =  ( 4 * n_th )
-        offset += sizeof(cross_info_t) * ( 4 * n_th );            
+        offset += sizeof(cross_info_t) * ( 4 * n_th );
+        
+        // 这里还能再加，可以给 astrometry
+
+        // 这里还能再加，可以给 astrometry
 
         this -> new_pts    = ( src_pt_t   < f_T >  * ) &dat_sh[offset]; // size = ( n_th ), medium part of margin_pts
 

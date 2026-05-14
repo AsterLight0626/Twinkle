@@ -24,16 +24,18 @@ int main()
     double RelTol = 1e-4;
 
 
-    int n_stream = 2;
+    int n_stream = 1;
     // twinkle::driver_t driver( n_stream );
     twinkle::driver_t driver;
 
     int device_num = 2;
-    driver.init( Nsrcs, device_num, n_stream, RelTol );
+    bool astrom = true;
+    driver.init( Nsrcs, device_num, n_stream, RelTol, astrom );
     // driver.set_params(ss,qq,rho,RelTol,xs,ys);
     driver.set_params(ss,qq,rho,xs,ys);
 
-    // driver.run(  );             // uniform brightness, faster
+    // driver.run_pt(  );
+    // driver.run(  );             // uniform brightness
     double LD_a = 1.0;          // linear limb darkening coefficient
     driver.runLD ( LD_a );
     // driver.p_dev->sync_all_streams(  );        
@@ -41,13 +43,16 @@ int main()
     double magnification[Nsrcs];
     driver.return_mag_to(magnification);
 
-    std::ofstream outfile("magnitude_data.txt");
+    twinkle::complex_t<double> astrom_Th[Nsrcs];
+    driver.return_astrom_to(astrom_Th);
+
+    std::ofstream outfile("output.txt");
     if (outfile.is_open()) {
         outfile.precision(16);
         outfile << std::fixed;
         for(int i_src=0;i_src<Nsrcs;i_src++)
         {
-            outfile << magnification[i_src] << std::endl;
+            outfile << magnification[i_src] << ", " << astrom_Th[i_src].re << ", " << astrom_Th[i_src].re<< std::endl;
         }
         
         outfile.close();
