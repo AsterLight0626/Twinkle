@@ -992,7 +992,7 @@ __device__ void source_base_t::connect_order
 			order[1] = ((jbest+3)/2) % 3;	// 1,2,2,0,0,1
 			order[2] = 2 - (jbest%3);	// 2,1,0,2,1,0
 
-			for(int j=0;j<6;j++)
+			for(int j=0;j<3;j++)
 			{
 				if(order[j]==2){order[j]=-1;}	// 2为虚解，标记为未连接
 			}
