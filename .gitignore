@@ -1,0 +1,23 @@
+# Compiled objects and dependency files
+obj/*.o
+obj/*.d
+
+# Compiled binary (keep bin/.gitkeep)
+bin/Twinkle
+
+# Python build artifacts
+python/build/
+python/dist/
+python/*.egg-info/
+python/*.cpython*.so
+python/.ipynb_checkpoints/
+python/*.npy
+
+# Local backup
+backup_main/
+
+# Generated data files
+output.txt
+Ncross.txt
+magnitude_data.txt
+limbdata_*.txt

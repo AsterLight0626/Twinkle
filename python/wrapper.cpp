@@ -38,40 +38,48 @@ static int PyTwinkle_init(PyTwinkle* self, PyObject* args, PyObject* kwargs) {
     int n_stream = 1;
     double RelTol = 1e-4;
     int astrom = 0;
+    int pt_only = 0;
 
     // 定义参数选项
     static char* kwlist1[] = {(char*)"n_srcs", (char*)"device_num", (char*)"n_stream", (char*)"RelTol", NULL};
     static char* kwlist2[] = {(char*)"n_srcs", (char*)"device_num", (char*)"n_stream", NULL};
     static char* kwlist3[] = {(char*)"n_srcs", (char*)"device_num", (char*)"n_stream", (char*)"RelTol", (char*)"astrom", NULL};
+    static char* kwlist4[] = {(char*)"n_srcs", (char*)"device_num", (char*)"n_stream", (char*)"RelTol", (char*)"astrom", (char*)"pt_only", NULL};
     
     // 解析参数字典
-    if  (PyArg_ParseTupleAndKeywords(args, kwargs, "iiidi", kwlist3, &n_srcs, &device_num, &n_stream, &RelTol, &astrom))
+    if  (PyArg_ParseTupleAndKeywords(args, kwargs, "i|iidii", kwlist4, &n_srcs, &device_num, &n_stream, &RelTol, &astrom, &pt_only))
     {    }
     else
     {
         PyErr_Clear();
-        if (PyArg_ParseTupleAndKeywords(args, kwargs, "iiid", kwlist1, &n_srcs, &device_num, &n_stream, &RelTol))
+        if  (PyArg_ParseTupleAndKeywords(args, kwargs, "iii|di", kwlist3, &n_srcs, &device_num, &n_stream, &RelTol, &astrom))
         {    }
         else
         {
             PyErr_Clear();
-            if (PyArg_ParseTupleAndKeywords(args, kwargs, "iii", kwlist2, &n_srcs, &device_num, &n_stream))
-            {  
-                // printf("In new version, RelTol is set in init(), default 1e-4. The RelTol in set_params() won't be used\n");
-                printf("RelTol should be set in init(), default 1e-4.\n");
-            }
+            if (PyArg_ParseTupleAndKeywords(args, kwargs, "iii|d", kwlist1, &n_srcs, &device_num, &n_stream, &RelTol))
+            {    }
             else
             {
-                return -1;
-            }
-        }        
+                PyErr_Clear();
+                if (PyArg_ParseTupleAndKeywords(args, kwargs, "iii", kwlist2, &n_srcs, &device_num, &n_stream))
+                {  
+                    // printf("In new version, RelTol is set in init(), default 1e-4. The RelTol in set_params() won't be used\n");
+                    printf("RelTol should be set in init(), default 1e-4.\n");
+                }
+                else
+                {
+                    return -1;
+                }
+            }        
+        }
     }
 
 
 
     try {
         self->obj = new twinkle::driver_t();
-        self->obj->init(n_srcs, device_num, n_stream, RelTol, astrom);
+        self->obj->init(n_srcs, device_num, n_stream, RelTol, (bool)astrom, (bool)pt_only);
     } 
     catch (const std::bad_alloc& e) {
         PyErr_SetString(PyExc_MemoryError, "Memory allocation failed");
@@ -398,6 +406,121 @@ static PyObject* get_numpy_build_version(PyObject* self, PyObject* args) {
     #endif
 }
 
+// dump_margin(source_idx) — copy pool_margin D→H and return boundary data for a single source
+static PyObject* PyTwinkle_dump_margin(PyTwinkle *self, PyObject *args) {
+    int src_idx = 0;
+    if (!PyArg_ParseTuple(args, "i", &src_idx)) {
+        PyErr_SetString(PyExc_TypeError, "Usage: dump_margin(source_index)");
+        return NULL;
+    }
+    
+    self->obj->dump_margin();
+    
+    // Find the right source_base for this source index
+    int n_src_per_stream = (self->obj->n_srcs_all - 1) / self->obj->vp_sol.size() + 1;
+    int stream_idx = src_idx / n_src_per_stream;
+    int local_idx  = src_idx % n_src_per_stream;
+    
+    if (stream_idx >= (int)self->obj->vp_sol.size()) {
+        PyErr_SetString(PyExc_IndexError, "source index out of range");
+        return NULL;
+    }
+    
+    auto* pool = &self->obj->vp_sol[stream_idx]->pool_margin;
+    int n_pts = pool->n_pts;         // n_src * n_point_max
+    int n_point_max = pool->stride;  // n_point_max
+    int n_src_local = n_pts / n_point_max;
+    
+    if (local_idx >= n_src_local) {
+        PyErr_SetString(PyExc_IndexError, "local index out of range");
+        return NULL;
+    }
+    
+    npy_intp npy_npts = (npy_intp)n_point_max;
+    
+    // Allocate numpy arrays for key fields
+    PyObject* arr_Q        = PyArray_SimpleNew(1, &npy_npts, NPY_DOUBLE);
+    PyObject* arr_Nphys    = PyArray_SimpleNew(1, &npy_npts, NPY_INT);
+    PyObject* arr_skip     = PyArray_SimpleNew(1, &npy_npts, NPY_BOOL);
+    PyObject* arr_prev_idx = PyArray_SimpleNew(1, &npy_npts, NPY_INT);
+    PyObject* arr_next_idx = PyArray_SimpleNew(1, &npy_npts, NPY_INT);
+    PyObject* arr_area_int = PyArray_SimpleNew(1, &npy_npts, NPY_DOUBLE);
+    PyObject* arr_err_int  = PyArray_SimpleNew(1, &npy_npts, NPY_DOUBLE);
+    PyObject* arr_pos_x    = PyArray_SimpleNew(1, &npy_npts, NPY_DOUBLE);
+    PyObject* arr_pos_y    = PyArray_SimpleNew(1, &npy_npts, NPY_DOUBLE);
+    
+    npy_intp npy_img_dims[2] = {npy_npts, 5};
+    PyObject* arr_img_x     = PyArray_SimpleNew(2, npy_img_dims, NPY_DOUBLE);
+    PyObject* arr_img_y     = PyArray_SimpleNew(2, npy_img_dims, NPY_DOUBLE);
+    PyObject* arr_img_phys  = PyArray_SimpleNew(2, npy_img_dims, NPY_BOOL);
+    PyObject* arr_img_parity= PyArray_SimpleNew(2, npy_img_dims, NPY_BOOL);
+    PyObject* arr_next_j    = PyArray_SimpleNew(2, npy_img_dims, NPY_INT);
+    PyObject* arr_nj_self   = PyArray_SimpleNew(2, npy_img_dims, NPY_INT);
+    PyObject* arr_deltaS    = PyArray_SimpleNew(2, npy_img_dims, NPY_DOUBLE);
+    PyObject* arr_deltaS_E  = PyArray_SimpleNew(2, npy_img_dims, NPY_DOUBLE);
+    PyObject* arr_wedge     = PyArray_SimpleNew(2, npy_img_dims, NPY_DOUBLE);
+    
+    int base_offset = local_idx * n_point_max;
+    
+    for (int i = 0; i < n_point_max; i++) {
+        auto& pt = pool->dat_h[base_offset + i];
+        ((double*)PyArray_DATA(arr_Q))[i]        = (double)pt.Q;
+        ((int*)   PyArray_DATA(arr_Nphys))[i]    = pt.Nphys;
+        ((bool*)  PyArray_DATA(arr_skip))[i]     = pt.skip;
+        ((int*)   PyArray_DATA(arr_prev_idx))[i] = pt.prev_src_idx;
+        ((int*)   PyArray_DATA(arr_next_idx))[i] = pt.next_src_idx;
+        ((double*)PyArray_DATA(arr_area_int))[i] = (double)pt.area_interval;
+        ((double*)PyArray_DATA(arr_err_int))[i]  = (double)pt.error_interval;
+        ((double*)PyArray_DATA(arr_pos_x))[i]    = (double)pt.position.re;
+        ((double*)PyArray_DATA(arr_pos_y))[i]    = (double)pt.position.im;
+        
+        for (int j = 0; j < 5; j++) {
+            int ij = i * 5 + j;
+            ((double*)PyArray_DATA(arr_img_x))[ij]      = (double)pt.images[j].position.re;
+            ((double*)PyArray_DATA(arr_img_y))[ij]      = (double)pt.images[j].position.im;
+            ((bool*)  PyArray_DATA(arr_img_phys))[ij]   = pt.images[j].physical;
+            ((bool*)  PyArray_DATA(arr_img_parity))[ij] = pt.images[j].parity;
+            ((int*)   PyArray_DATA(arr_next_j))[ij]     = pt.next_j[j];
+            ((int*)   PyArray_DATA(arr_nj_self))[ij]    = pt.next_idx[j];
+            ((double*)PyArray_DATA(arr_deltaS))[ij]     = (double)pt.deltaS[j];
+            ((double*)PyArray_DATA(arr_deltaS_E))[ij]   = (double)pt.deltaS_Err[j];
+            ((double*)PyArray_DATA(arr_wedge))[ij]      = (double)pt.wedge[j];
+        }
+    }
+    
+    PyObject* dict = PyDict_New();
+    PyDict_SetItemString(dict, "Q",           arr_Q);
+    PyDict_SetItemString(dict, "Nphys",       arr_Nphys);
+    PyDict_SetItemString(dict, "skip",        arr_skip);
+    PyDict_SetItemString(dict, "prev_src_idx",arr_prev_idx);
+    PyDict_SetItemString(dict, "next_src_idx",arr_next_idx);
+    PyDict_SetItemString(dict, "area_interval",arr_area_int);
+    PyDict_SetItemString(dict, "error_interval",arr_err_int);
+    PyDict_SetItemString(dict, "pos_x",       arr_pos_x);
+    PyDict_SetItemString(dict, "pos_y",       arr_pos_y);
+    PyDict_SetItemString(dict, "img_x",       arr_img_x);
+    PyDict_SetItemString(dict, "img_y",       arr_img_y);
+    PyDict_SetItemString(dict, "img_physical",arr_img_phys);
+    PyDict_SetItemString(dict, "img_parity",  arr_img_parity);
+    PyDict_SetItemString(dict, "next_j",      arr_next_j);
+    PyDict_SetItemString(dict, "next_idx",    arr_nj_self);
+    PyDict_SetItemString(dict, "deltaS",      arr_deltaS);
+    PyDict_SetItemString(dict, "deltaS_Err",  arr_deltaS_E);
+    PyDict_SetItemString(dict, "wedge",       arr_wedge);
+    PyDict_SetItemString(dict, "n_point_max", PyLong_FromLong(n_point_max));
+    
+    Py_DECREF(arr_Q); Py_DECREF(arr_Nphys); Py_DECREF(arr_skip);
+    Py_DECREF(arr_prev_idx); Py_DECREF(arr_next_idx);
+    Py_DECREF(arr_area_int); Py_DECREF(arr_err_int);
+    Py_DECREF(arr_pos_x); Py_DECREF(arr_pos_y);
+    Py_DECREF(arr_img_x); Py_DECREF(arr_img_y);
+    Py_DECREF(arr_img_phys); Py_DECREF(arr_img_parity);
+    Py_DECREF(arr_next_j); Py_DECREF(arr_nj_self);
+    Py_DECREF(arr_deltaS); Py_DECREF(arr_deltaS_E); Py_DECREF(arr_wedge);
+    
+    return dict;
+}
+
 // 方法表修正（参数类型匹配）
 static PyMethodDef PyTwinkle_methods[] = {
     {"init", (PyCFunction)PyTwinkle_init, METH_VARARGS, "Initialize driver"},
@@ -409,6 +532,7 @@ static PyMethodDef PyTwinkle_methods[] = {
     {"run_pt", (PyCFunction)PyTwinkle_run_pt, METH_NOARGS, "point source approximation"},
     {"runLD", (PyCFunction)PyTwinkle_runLD, METH_VARARGS, "Run limb darkening calculation with given linear LD coefficient"},
     // {"runLD2", (PyCFunction)PyTwinkle_runLD2, METH_VARARGS, "test version, Run limb darkening calculation with given linear LD coefficient"},
+    {"dump_margin", (PyCFunction)PyTwinkle_dump_margin, METH_VARARGS, "Dump pool_margin D->H for a source index"},
     {"get_numpy_build_version", get_numpy_build_version, METH_NOARGS, "Build-time numpy version"},
     {NULL, NULL, 0, NULL}  // Sentinel
 };

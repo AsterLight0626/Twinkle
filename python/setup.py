@@ -10,8 +10,7 @@ from sysconfig import get_paths as sysconfig_get_paths
 
 python_include = sysconfig_get_paths()['include']
 CUDA_HOME = os.environ["CUDA_HOME"]
-# CUDA_HOME = os.environ.get("CUDA_HOME", "/usr/local/cuda")
-# cuda_version = str(12.3)
+CUDA_ARCH = os.environ.get("CUDA_ARCH", "sm_70")  # override: CUDA_ARCH=sm_89
 
 
 class CUDAExtension(Extension):
@@ -34,7 +33,7 @@ class CustomBuildExt(build_ext):
             link_cmd = [
                 CUDA_HOME+'/bin/nvcc',
                 '--shared',
-                '-arch=sm_70',
+                '-arch='+CUDA_ARCH,
                 '-Xcompiler', '-fPIC',       # 显式传递PIC参数
                 '-Xlinker', '-rpath='+CUDA_HOME+'/lib64',
                 '-o', ext_path,
@@ -56,9 +55,10 @@ class CustomBuildExt(build_ext):
             raise RuntimeError(f"NVCC not found at {nvcc}")
 
         nvcc_flags = [
-            '-arch=sm_70',
+            '-arch='+CUDA_ARCH,
             '-std=c++17',
             '-O3',
+            '-lineinfo',
             '-x', 'cu',
             '-rdc=true',
             '--expt-relaxed-constexpr',

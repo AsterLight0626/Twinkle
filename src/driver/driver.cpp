@@ -50,7 +50,7 @@ driver_t::~driver_t(  )
 //     return;
 // }
 
-void driver_t::init( const int n_srcs, const int device_num, const int n_stream, const double RELTOL, const bool astrom)
+void driver_t::init( const int n_srcs, const int device_num, const int n_stream, const double RELTOL, const bool astrom, const bool pt_only)
 {
 
     vp_sol.resize( n_stream );
@@ -68,7 +68,7 @@ void driver_t::init( const int n_srcs, const int device_num, const int n_stream,
         p_sol = std::make_shared< source_base_t > (  );
         p_sol->n_src = n_src_per_stream;
         p_sol->streamidx = i;
-        p_sol->init( * p_dev );
+        p_sol->init( * p_dev, pt_only );
         p_sol->RelTol    =   RELTOL;
         p_sol->astrom = astrom;
     }
@@ -76,7 +76,7 @@ void driver_t::init( const int n_srcs, const int device_num, const int n_stream,
     p_sol = std::make_shared< source_base_t > (  );
     p_sol->n_src = n_srcs - n_src_per_stream * ( vp_sol.size()-1 );
     p_sol->streamidx = vp_sol.size()-1;
-    p_sol->init( * p_dev );
+    p_sol->init( * p_dev, pt_only );
     p_sol->RelTol    =   RELTOL;
     p_sol->astrom = astrom;
 
@@ -103,6 +103,8 @@ void driver_t::init( const int n_srcs, const int device_num, const int n_stream,
 
 void driver_t::set_params( double ss, double qq, double rho, double RELTOL, double* xs, double* ys )
 {
+    if( vp_sol.empty() )
+        return;
     for( auto & p_sol : vp_sol )
     {
         // p_sol->s = ss;
@@ -131,6 +133,8 @@ void driver_t::set_params( double ss, double qq, double rho, double RELTOL, doub
 
 void driver_t::set_params( double ss, double qq, double rho, double* xs, double* ys )
 {
+    if( vp_sol.empty() )
+        return;
     for( auto & p_sol : vp_sol )
     {
         // p_sol->s = ss;
@@ -158,6 +162,8 @@ void driver_t::set_params( double ss, double qq, double rho, double* xs, double*
 
 void driver_t::set_params( const double* ss, double qq, double rho, double RELTOL, double* xs, double* ys )
 {
+    if( vp_sol.empty() )
+        return;
     for( auto & p_sol : vp_sol )
     {
         // p_sol->s = ss;
@@ -186,6 +192,8 @@ void driver_t::set_params( const double* ss, double qq, double rho, double RELTO
 
 void driver_t::set_params( const double* ss, double qq, double rho, double* xs, double* ys )
 {
+    if( vp_sol.empty() )
+        return;
     for( auto & p_sol : vp_sol )
     {
         // p_sol->s = ss;
@@ -213,6 +221,8 @@ void driver_t::set_params( const double* ss, double qq, double rho, double* xs, 
 
 void driver_t::return_mag_to( double* mag )
 {
+    if( vp_sol.empty() )
+        return;
     int n_src_per_stream = (n_srcs_all-1) / vp_sol.size() + 1;  // vp_sol.size = nstream
     for( auto & p_sol : vp_sol )
     {
@@ -226,6 +236,8 @@ void driver_t::return_mag_to( double* mag )
 
 void driver_t::return_mag_err_to( double* mag, double* err )
 {
+    if( vp_sol.empty() )
+        return;
     int n_src_per_stream = (n_srcs_all-1) / vp_sol.size() + 1;  // vp_sol.size = nstream
     for( auto & p_sol : vp_sol )
     {
@@ -240,6 +252,8 @@ void driver_t::return_mag_err_to( double* mag, double* err )
 
 void driver_t::return_Ncross_to( int* Ncross )
 {
+    if( vp_sol.empty() )
+        return;
     int n_src_per_stream = (n_srcs_all-1) / vp_sol.size() + 1;  // vp_sol.size = nstream
     for( auto & p_sol : vp_sol )
     {
@@ -253,6 +267,8 @@ void driver_t::return_Ncross_to( int* Ncross )
 
 void driver_t::return_astrom_to( twinkle::complex_t<double>* astrom_Th )
 {
+    if( vp_sol.empty() )
+        return;
     int n_src_per_stream = (n_srcs_all-1) / vp_sol.size() + 1;  // vp_sol.size = nstream
     if(vp_sol[0]->astrom)
     {
@@ -278,6 +294,13 @@ void driver_t::free(  )
         p_sol->free( * p_dev );
     // p_dev->sync_all_streams(   );
     // p_dev->finalize(  );
+    return;
+}
+
+void driver_t::dump_margin(  )
+{
+    for( auto & p_sol : vp_sol )    
+        p_sol->dump_margin( * p_dev );
     return;
 }
 

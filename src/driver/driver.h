@@ -16,7 +16,7 @@ class driver_t
 public:
      driver_t(  );
     ~driver_t(  );
-    virtual void init( const int n_srcs, const int device_num=0, const int n_stream=1, const double RELTOL=1e-4, const bool astrom=false );
+    virtual void init( const int n_srcs, const int device_num=0, const int n_stream=1, const double RELTOL=1e-4, const bool astrom=false, const bool pt_only=false );
     // virtual void init( const int n_srcs, const int device_num, const int n_stream, const double RELTOL);
     // virtual void set_params_2D( double ss, double qq, double rho, double xmax, double xmin, double ymax, double ymin, int Nx, int Ny );
     // virtual void set_params_1D( double ss, double qq, double rho, double xmax, double xmin, double ymax, double ymin, int Nsrc );
@@ -29,6 +29,7 @@ public:
     virtual void return_Ncross_to( int* Ncross );
     virtual void return_astrom_to(twinkle::complex_t<double>* astrom_Th );
     virtual void free(  );    
+    virtual void dump_margin(  );
 
     int n_srcs_all;
 

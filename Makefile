@@ -14,6 +14,7 @@ OBJEXT     := o
 ARCH       ?= CUDA
 DEBUG      ?= 0
 MPI        ?= 0
+CUDA_ARCH  ?= sm_70   # override: make CUDA_ARCH=sm_89
 
 # Flags, Libraries and Includes
 CFLAGS_CMD :=
@@ -21,11 +22,11 @@ INCDEP     :=
 ifeq ($(ARCH),CUDA)
 	CC     := nvcc
 	ifeq ($(DEBUG),1)
-	CFLAGS := -std=c++17 -rdc=true -arch=sm_70 -O0 -g\
+	CFLAGS := -std=c++17 -rdc=true -arch=$(CUDA_ARCH) -O0 -g\
               -include ./src/utils/debug_macros.h \
 	          -G -D __GPU_DEBUG__ -diag-suppress 3
 	else   #DEBUG
-	CFLAGS := -std=c++17 -rdc=true -arch=sm_70 -O3 \
+	CFLAGS := -std=c++17 -rdc=true -arch=$(CUDA_ARCH) -O3 \
               --use_fast_math $(CFLAGS_CMD)
     endif  #DEBUG
     INC    := -x cu
