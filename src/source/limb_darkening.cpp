@@ -42,7 +42,7 @@ __host__ void source_base_t::monotest(twinkle::ErrorUnit_t<double>& eu)
     return;
 }
 
-__host__ void source_base_t::caustic_cal(double lens_s, double lens_q, c_t* caustic_points)
+__host__ bool source_base_t::caustic_cal(double lens_s, double lens_q, c_t* caustic_points)
 {
 
     c_t coef[5];
@@ -91,12 +91,8 @@ __host__ void source_base_t::caustic_cal(double lens_s, double lens_q, c_t* caus
     {
         caustic_points[caus_i] = temp_images[caus_i].position + f_zbar(temp_images[caus_i].position, lens_s );
     }
-    if(fail)
-    {
-        caustic_points = nullptr;        
-    }
-        
-    return;
+
+    return fail;    // 由调用方决定求根失败时如何处理（此前置空局部指针副本，失败信号无法传出）
 }
 
 __host__ void source_base_t::hidden_phi(c_t* caustic_pts, const c_t& loc_center, double rho, double* phi_hidden)
@@ -208,36 +204,30 @@ __host__ void source_base_t::runLD_beta( device_t & f_dev, double LD_a, int* Nun
 
     c_t* caustic_pts = new c_t[5*n_src];
     f_t* phi_hidden = new f_t[5*n_src];
-    f_t prev_lens_s, prev_lens_q;
+    f_t prev_lens_s = 0, prev_lens_q = -1;      // 强制首个未完成源重新计算（此前未初始化，且 i_src==0 被跳过时读到垃圾值）
+    bool prev_caustic_fail = false;
+    c_t* prev_caustic_pts = nullptr;            // 指向最近一次真实计算的 caustic 块（此前固定从 i_src-1 拷贝，若该源已完成则是未写入的垃圾）
     for(int i_src=0;i_src<n_src;i_src++)
     {
         if(!finished[i_src])
         {
             c_t* caustic_pts_i = caustic_pts + i_src*5;
-            if(i_src==0)
+            if(prev_caustic_pts != nullptr && pool_lens_s.dat_h[ i_src ] == prev_lens_s && lens_q == prev_lens_q)
             {
-                caustic_cal(pool_lens_s.dat_h[ i_src ], lens_q, caustic_pts_i);
-                prev_lens_s = pool_lens_s.dat_h[ i_src ];
-                prev_lens_q = lens_q;
+                for(int caus_i=0;caus_i<5;caus_i++)
+                {
+                    caustic_pts_i[caus_i] = prev_caustic_pts[caus_i];
+                }
             }
             else
             {
-                if(pool_lens_s.dat_h[ i_src ] == prev_lens_s && lens_q == prev_lens_q)
-                {
-                    for(int caus_i=0;caus_i<5;caus_i++)
-                    {
-                        caustic_pts_i[caus_i] = caustic_pts[(i_src-1)*5 + caus_i];
-                    }
-                }
-                else
-                {
-                    caustic_cal(pool_lens_s.dat_h[ i_src ], lens_q, caustic_pts_i);
-                    prev_lens_s = pool_lens_s.dat_h[ i_src ];
-                    prev_lens_q = lens_q;
-                }
+                prev_caustic_fail = caustic_cal(pool_lens_s.dat_h[ i_src ], lens_q, caustic_pts_i);
+                prev_lens_s = pool_lens_s.dat_h[ i_src ];
+                prev_lens_q = lens_q;
+                prev_caustic_pts = caustic_pts_i;
             }
             f_t* phi_hidden_i = phi_hidden + i_src*5;
-            hidden_phi(caustic_pts_i, pool_center.dat_h [ i_src ].loc_centre, pool_center.dat_h [ i_src ].rho, phi_hidden_i);
+            hidden_phi(prev_caustic_fail ? nullptr : caustic_pts_i, pool_center.dat_h [ i_src ].loc_centre, pool_center.dat_h [ i_src ].rho, phi_hidden_i);
             EU_buffer[i_src].phi_hidden = phi_hidden_i;
         }
     }

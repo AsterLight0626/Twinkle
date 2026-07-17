@@ -147,6 +147,18 @@ static PyObject* PyTwinkle_set_params(PyTwinkle *self, PyObject *args) {
         goto cleanup;
     }
 
+    // 检查数组长度是否与 init() 时的 n_srcs 一致，防止 host 侧越界读写
+    if (self->obj == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "Twinkle object is not initialized");
+        goto cleanup;
+    }
+    if (len_x != (npy_intp)self->obj->n_srcs_all) {
+        PyErr_Format(PyExc_ValueError,
+            "xs/ys length (%zd) must equal n_srcs in init() (%d)",
+            (Py_ssize_t)len_x, self->obj->n_srcs_all);
+        goto cleanup;
+    }
+
     try {
         if(RelTol<=0.)      //  如果没设置 RelTol
         {
@@ -255,6 +267,17 @@ static PyObject* PyTwinkle_return_mag_to(PyTwinkle *self, PyObject *args) {
     double* buffer = (double*)PyArray_DATA(py_array);
     const npy_intp size = PyArray_SIZE(py_array);
 
+    if (self->obj == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "Twinkle object is not initialized");
+        return NULL;
+    }
+    if (size < (npy_intp)self->obj->n_srcs_all) {
+        PyErr_Format(PyExc_ValueError,
+            "output array size (%zd) is smaller than n_srcs (%d), would cause out-of-bounds write",
+            (Py_ssize_t)size, self->obj->n_srcs_all);
+        return NULL;
+    }
+
     try {
         self->obj->return_mag_to(buffer);  // 直接写入NumPy数组
         Py_RETURN_NONE;
@@ -283,6 +306,17 @@ static PyObject* PyTwinkle_return_Ncross_to(PyTwinkle *self, PyObject *args) {
     int* buffer = (int*)PyArray_DATA(py_array);
     const npy_intp size = PyArray_SIZE(py_array);
 
+    if (self->obj == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "Twinkle object is not initialized");
+        return NULL;
+    }
+    if (size < (npy_intp)self->obj->n_srcs_all) {
+        PyErr_Format(PyExc_ValueError,
+            "output array size (%zd) is smaller than n_srcs (%d), would cause out-of-bounds write",
+            (Py_ssize_t)size, self->obj->n_srcs_all);
+        return NULL;
+    }
+
     try {
         self->obj->return_Ncross_to(buffer);  // 调用对应的C++函数
         Py_RETURN_NONE;
@@ -310,6 +344,17 @@ static PyObject* PyTwinkle_return_astrom_to(PyTwinkle *self, PyObject *args) {
 
     twinkle::complex_t<double>* buffer = (twinkle::complex_t<double>*)PyArray_DATA(py_array);
     const npy_intp size = PyArray_SIZE(py_array);
+
+    if (self->obj == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "Twinkle object is not initialized");
+        return NULL;
+    }
+    if (size < (npy_intp)self->obj->n_srcs_all) {
+        PyErr_Format(PyExc_ValueError,
+            "output array size (%zd) is smaller than n_srcs (%d), would cause out-of-bounds write",
+            (Py_ssize_t)size, self->obj->n_srcs_all);
+        return NULL;
+    }
 
     try {
         self->obj->return_astrom_to(buffer);  // 调用对应的C++函数
@@ -531,7 +576,6 @@ static PyMethodDef PyTwinkle_methods[] = {
     {"run", (PyCFunction)PyTwinkle_run, METH_NOARGS, "Execute computation"},
     {"run_pt", (PyCFunction)PyTwinkle_run_pt, METH_NOARGS, "point source approximation"},
     {"runLD", (PyCFunction)PyTwinkle_runLD, METH_VARARGS, "Run limb darkening calculation with given linear LD coefficient"},
-    // {"runLD2", (PyCFunction)PyTwinkle_runLD2, METH_VARARGS, "test version, Run limb darkening calculation with given linear LD coefficient"},
     {"dump_margin", (PyCFunction)PyTwinkle_dump_margin, METH_VARARGS, "Dump pool_margin D->H for a source index"},
     {"get_numpy_build_version", get_numpy_build_version, METH_NOARGS, "Build-time numpy version"},
     {NULL, NULL, 0, NULL}  // Sentinel

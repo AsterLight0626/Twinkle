@@ -571,7 +571,7 @@ __host__ __device__ void cmplx_laguerre(c_T *poly, int degree, c_T *root, int &i
     else{FRAC_ERR = ROUND_OFF_D;} //Fractional Error for double precision
 
 	c_T p, dp, d2p_half; //value of polynomial, 1st derivative, and 2nd derivative
-	static int i, k;
+	int i, k;	// NOTE: must NOT be static — static locals in __device__ code are shared by all threads in the grid (data race)
 	bool good_to_go;
 	c_T denom, denom_sqrt, dx, newroot;
 	f_T ek, absroot, abs2p;

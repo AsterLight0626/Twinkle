@@ -399,7 +399,7 @@ public:
 
     __host__ virtual bool monotest_single(double val_L, double val_R, double Mag_L, double Mag_R, double phi_self, double& val_self, double& Mag_self);
     __host__ virtual void monotest(twinkle::ErrorUnit_t<double>& eu);
-    __host__ virtual void caustic_cal(double lens_s, double lens_q, c_t* caustic_points);
+    __host__ virtual bool caustic_cal(double lens_s, double lens_q, c_t* caustic_points);
     __host__ virtual void hidden_phi(c_t* caustic_pts, const c_t& loc_center, double rho, double* phi_hidden);
 
 
